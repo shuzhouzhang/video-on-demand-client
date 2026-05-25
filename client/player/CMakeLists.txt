@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.19)
 project(player LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg)
 
 qt_standard_project_setup()
+
+# 让 CMake 自动调用 Qt 的 rcc 工具编译 .qrc 资源文件。
+# 否则代码里的 :/images/... 路径会找不到图片，按钮图标会显示为空白。
+set(CMAKE_AUTORCC ON)
 
 qt_add_executable(player
     WIN32 MACOSX_BUNDLE
@@ -11,13 +15,24 @@ qt_add_executable(player
     player.cpp
     player.h
     player.ui
+
+    startuppage.h startuppage.cpp
+    imageRes.qrc
+    pageswitchbutton.h pageswitchbutton.cpp
+    util.h
+
 )
 
 target_link_libraries(player
     PRIVATE
         Qt::Core
         Qt::Widgets
+        Qt::Svg
 )
+
+if (WIN32)
+    target_link_libraries(player PRIVATE dwmapi)
+endif()
 
 install(TARGETS player
     BUNDLE  DESTINATION .
