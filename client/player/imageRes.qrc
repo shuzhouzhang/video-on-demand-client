@@ -1,3 +1,7 @@
+<!--
+imageRes.qrc 是 Qt 资源清单文件。
+这里列出的图片会在构建时被 rcc 编译进程序，代码中就可以用 :/images/... 访问。
+-->
 <RCC>
     <qresource prefix="/">
         <file>images/startupPage/biteshipin.png</file>

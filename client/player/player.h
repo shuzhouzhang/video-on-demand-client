@@ -1,3 +1,5 @@
+// player.h 声明主窗口类。
+// 主窗口负责承载顶部栏、左侧导航、右侧页面栈，并处理无边框窗口拖拽。
 #ifndef PLAYER_H
 #define PLAYER_H
 
@@ -8,6 +10,7 @@ class QMouseEvent;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
+// 这个类由 Qt 根据 player.ui 自动生成，里面保存了 ui->xxx 这些控件指针。
 class player;
 }
 QT_END_NAMESPACE
@@ -31,6 +34,7 @@ private:
     void initUI();
 
 private:
+    // ui 指向 Qt Designer 生成的界面对象，控件都从这里访问。
     Ui::player *ui;
 
     // true 表示用户正在按住窗口拖动。

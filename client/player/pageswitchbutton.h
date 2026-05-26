@@ -1,3 +1,5 @@
+// pageswitchbutton.h 声明左侧导航按钮控件。
+// 它不是普通 QPushButton，而是由“图标 QLabel + 文字 QLabel”组合成的自定义 QWidget。
 #ifndef PAGESWITCHBUTTON_H
 #define PAGESWITCHBUTTON_H
 
