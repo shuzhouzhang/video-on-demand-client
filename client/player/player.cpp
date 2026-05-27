@@ -4,12 +4,19 @@
 #include "ui_player.h"
 #include "pageswitchbutton.h"
 #include "util.h"
+#include "videobox.h"
 
 #include <QGraphicsDropShadowEffect>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QList>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QStringList>
+#include <QStyle>
 #include <QVBoxLayout>
 
 player::player(QWidget *parent)
@@ -78,6 +85,84 @@ void player::initUI()
     ui->sysPageBtn->setText("后台");
     ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
 
+    auto refreshButtonStyle = [](QPushButton *button) {
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+        button->update();
+    };
+
+    auto setupTextButtonGroup = [refreshButtonStyle](QHBoxLayout *layout,
+                                                     const QStringList &texts,
+                                                     const QString &logPrefix) {
+        QList<QPushButton *> buttons;
+
+        for (int i = 0; i < texts.size(); ++i) {
+            auto *button = new QPushButton(texts[i]);
+            button->setObjectName("homeTextOption");
+            button->setCursor(Qt::PointingHandCursor);
+            button->setFlat(true);
+            button->setProperty("selected", i == 0);
+            button->setMinimumHeight(30);
+            button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+            buttons.append(button);
+            layout->addWidget(button);
+        }
+
+        for (auto *button : buttons) {
+            QObject::connect(button, &QPushButton::clicked, button, [buttons, button, refreshButtonStyle, logPrefix]() {
+                for (auto *item : buttons) {
+                    item->setProperty("selected", item == button);
+                    refreshButtonStyle(item);
+                }
+
+                LOG() << logPrefix << button->text();
+            });
+        }
+
+        layout->addStretch();
+    };
+
+    setupTextButtonGroup(ui->classifyHLayout,
+                         {"分类", "历史", "美食", "游戏", "科技", "运动", "动物", "旅游", "电影"},
+                         "切换分类:");
+    setupTextButtonGroup(ui->labelHLayout,
+                         {"标签", "中国史", "世界史", "美食测评", "美食制作", "游戏攻略"},
+                         "切换标签:");
+
+    ui->videoScrollLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+
+    struct StaticVideoInfo {
+        QString title;
+        QString userName;
+        QString date;
+        QString duration;
+        QString playCount;
+        QString likeCount;
+    };
+
+    const QList<StaticVideoInfo> videos = {
+        {"【北京旅游攻略】一条视频告诉你去了北京该怎么玩~", "用户昵称", "9-16", "25:52", "26.1万", "1226"},
+        {"一条视频告诉你去了北京该怎么玩~", "用户昵称", "9-16", "25:52", "26.1万", "1226"},
+        {"世界史入门：从文明起源讲到现代", "用户昵称", "9-16", "18:36", "18.8万", "935"},
+        {"美食测评：北京胡同里的宝藏小店", "用户昵称", "9-16", "12:08", "9.7万", "521"},
+        {"游戏攻略：新手也能快速上手的通关路线", "用户昵称", "9-16", "21:47", "32.4万", "2048"},
+        {"科技观察：一分钟看懂智能设备新趋势", "用户昵称", "9-16", "08:45", "7.2万", "318"},
+        {"运动训练：每天十分钟改善体态", "用户昵称", "9-16", "16:20", "11.3万", "746"},
+        {"动物世界：森林里的奇妙一天", "用户昵称", "9-16", "14:33", "15.6万", "889"},
+    };
+
+    for (int i = 0; i < videos.size(); ++i) {
+        auto *videoBox = new VideoBox(ui->videoScrollContents);
+        const auto &video = videos[i];
+        videoBox->setVideoInfo(video.title,
+                               video.userName,
+                               video.date,
+                               video.duration,
+                               video.playCount,
+                               video.likeCount);
+        ui->videoScrollLayout->addWidget(videoBox, i / 4, i % 4);
+    }
+
     auto switchNavButton = [this](int index) {
         // 左侧导航按钮和右侧页面栈保持同一个 index，后续扩展新页面也更直观。
         ui->stackedWidget->setCurrentIndex(index);
@@ -124,6 +209,9 @@ void player::initUI()
     ui->quitBtn->raise();
     connect(ui->minBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(ui->quitBtn, &QPushButton::clicked, this, &QWidget::close);
+    connect(ui->searchBtn, &QPushButton::clicked, this, [this]() {
+        LOG() << "点击搜索按钮，关键词:" << ui->searchEdit->text();
+    });
 
     resize(1450, 860);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
@@ -170,9 +258,12 @@ void player::initUI()
         QLineEdit#searchEdit {
             min-height: 32px;
             padding-left: 14px;
-            padding-right: 14px;
+            padding-right: 12px;
             border: 1px solid #dbe7f0;
-            border-radius: 16px;
+            border-top-left-radius: 16px;
+            border-bottom-left-radius: 16px;
+            border-top-right-radius: 0px;
+            border-bottom-right-radius: 0px;
             color: #333333;
             background: #ffffff;
             font-size: 14px;
@@ -183,6 +274,34 @@ void player::initUI()
         QScrollArea#videoScroll {
             border: none;
         }
+        QPushButton#homeTextOption {
+            min-width: 52px;
+            padding-left: 8px;
+            padding-right: 8px;
+            border: none;
+            color: #555b66;
+            background: transparent;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        QPushButton#homeTextOption[selected="true"] {
+            color: #3eceff;
+        }
+        QPushButton#homeTextOption:hover {
+            color: #111827;
+        }
+        QPushButton#searchBtn {
+            border: none;
+            border-top-right-radius: 16px;
+            border-bottom-right-radius: 16px;
+            color: #ffffff;
+            background: #3eceff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        QPushButton#searchBtn:hover {
+            background: #26bce9;
+        }
         QLabel#myPageLabel,
         QLabel#adminPageLabel {
             color: #8b95a1;
@@ -191,6 +310,50 @@ void player::initUI()
             background: transparent;
         }
     )");
+
+    // 参考原客户端：在首页右下方放一个悬浮工具条，上面置顶，下面刷新。
+    auto *refreshTopWidget = new QWidget(ui->homePage);
+    refreshTopWidget->setFixedSize(42, 94);
+    refreshTopWidget->move(1278, 618);
+
+    auto *refreshTopLayout = new QVBoxLayout(refreshTopWidget);
+    refreshTopLayout->setContentsMargins(0, 0, 0, 0);
+    refreshTopLayout->setSpacing(10);
+
+    auto *topBtn = new QPushButton(refreshTopWidget);
+    topBtn->setFixedSize(42, 42);
+    topBtn->setCursor(Qt::PointingHandCursor);
+    topBtn->setIcon(QIcon(":/images/homePage/zhiding.png"));
+    topBtn->setIconSize(QSize(42, 42));
+    topBtn->setStyleSheet(R"(
+        QPushButton {
+            border: 1px solid #eef2f7;
+            border-radius: 21px;
+            background-color: rgba(221, 221, 221, 0.65);
+        }
+        QPushButton:hover {
+            background-color: rgba(102, 102, 102, 0.35);
+        }
+    )");
+    refreshTopLayout->addWidget(topBtn);
+
+    auto *refreshBtn = new QPushButton(refreshTopWidget);
+    refreshBtn->setFixedSize(42, 42);
+    refreshBtn->setCursor(Qt::PointingHandCursor);
+    refreshBtn->setIcon(QIcon(":/images/homePage/shuaxin.png"));
+    refreshBtn->setIconSize(QSize(42, 42));
+    refreshBtn->setStyleSheet(topBtn->styleSheet());
+    refreshTopLayout->addWidget(refreshBtn);
+    refreshTopWidget->raise();
+
+    connect(topBtn, &QPushButton::clicked, this, [this]() {
+        ui->videoScroll->verticalScrollBar()->setValue(0);
+        LOG() << "点击置顶按钮，视频列表回到顶部";
+    });
+    connect(refreshBtn, &QPushButton::clicked, this, [this]() {
+        ui->videoScroll->verticalScrollBar()->setValue(0);
+        LOG() << "点击刷新按钮，当前阶段仅回到顶部，暂不重新请求视频列表";
+    });
 
     // 放在全局样式后面设置，避免窗口全局样式覆盖按钮图片。
     ui->minBtn->setStyleSheet(R"(
