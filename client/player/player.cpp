@@ -86,6 +86,20 @@ void player::initUI()
     ui->sysPageBtn->setText("后台");
     ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
 
+    // 我的页面第一版只展示静态个人中心，先用本地资源和假数据把结构搭起来。
+    ui->myAvatarBtn->setStyleSheet("border: none; border-image: url(:/images/myself/defaultAvatar.png);");
+    ui->editProfileBtn->setIcon(QIcon(":/images/myself/bianji.png"));
+    ui->editProfileBtn->setIconSize(QSize(16, 16));
+
+    ui->uploadEntryBtn->setIcon(QIcon(":/images/myself/shangchuanshipin.png"));
+    ui->uploadEntryBtn->setIconSize(QSize(28, 28));
+    ui->myVideoEntryBtn->setIcon(QIcon(":/images/myself/gengduo.png"));
+    ui->myVideoEntryBtn->setIconSize(QSize(28, 28));
+    ui->followEntryBtn->setIcon(QIcon(":/images/myself/guanzhu.png"));
+    ui->followEntryBtn->setIconSize(QSize(28, 28));
+    ui->settingEntryBtn->setIcon(QIcon(":/images/myself/shezhi.png"));
+    ui->settingEntryBtn->setIconSize(QSize(28, 28));
+
     auto refreshButtonStyle = [](QPushButton *button) {
         button->style()->unpolish(button);
         button->style()->polish(button);
@@ -228,6 +242,21 @@ void player::initUI()
     connect(ui->searchBtn, &QPushButton::clicked, this, [this]() {
         LOG() << "点击搜索按钮，关键词:" << ui->searchEdit->text();
     });
+    connect(ui->editProfileBtn, &QPushButton::clicked, this, []() {
+        LOG() << "点击编辑资料按钮，当前阶段暂不打开编辑资料页";
+    });
+    connect(ui->uploadEntryBtn, &QPushButton::clicked, this, []() {
+        LOG() << "点击上传视频入口，当前阶段暂不打开上传页";
+    });
+    connect(ui->myVideoEntryBtn, &QPushButton::clicked, this, []() {
+        LOG() << "点击我的视频入口，当前阶段暂不加载作品列表";
+    });
+    connect(ui->followEntryBtn, &QPushButton::clicked, this, []() {
+        LOG() << "点击我的关注入口，当前阶段暂不加载关注列表";
+    });
+    connect(ui->settingEntryBtn, &QPushButton::clicked, this, []() {
+        LOG() << "点击设置入口，当前阶段暂不打开设置页";
+    });
 
     resize(1450, 860);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
@@ -268,7 +297,15 @@ void player::initUI()
         QWidget#searchBox,
         QWidget#videoBox,
         QScrollArea#videoScroll,
-        QWidget#videoScrollContents {
+        QWidget#videoScrollContents,
+        QWidget#myProfileBox,
+        QWidget#myInfoBox,
+        QWidget#myStatsBox,
+        QWidget#myWorksStatBox,
+        QWidget#myFollowStatBox,
+        QWidget#myLikeStatBox,
+        QWidget#myActionBox,
+        QWidget#myWorksBox {
             background: #ffffff;
         }
         QLineEdit#searchEdit {
@@ -324,6 +361,74 @@ void player::initUI()
             font-size: 22px;
             font-weight: 600;
             background: transparent;
+        }
+        QLabel#myNickNameLabel {
+            color: #111827;
+            font-size: 24px;
+            font-weight: 700;
+            background: transparent;
+        }
+        QLabel#myAccountLabel,
+        QLabel#myDescLabel,
+        QLabel#myWorksTextLabel,
+        QLabel#myFollowTextLabel,
+        QLabel#myLikeTextLabel,
+        QLabel#myWorksEmptyLabel {
+            color: #8b95a1;
+            font-size: 14px;
+            background: transparent;
+        }
+        QLabel#myWorksCountLabel,
+        QLabel#myFollowCountLabel,
+        QLabel#myLikeCountLabel {
+            color: #111827;
+            font-size: 22px;
+            font-weight: 700;
+            background: transparent;
+        }
+        QLabel#myWorksTitleLabel {
+            color: #111827;
+            font-size: 18px;
+            font-weight: 700;
+            background: transparent;
+        }
+        QLabel#myWorksEmptyLabel {
+            border: 1px dashed #dbe7f0;
+            border-radius: 8px;
+            background: #fbfdff;
+        }
+        QPushButton#editProfileBtn {
+            border: 1px solid #dbe7f0;
+            border-radius: 17px;
+            color: #374151;
+            background: #ffffff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        QPushButton#editProfileBtn:hover {
+            border-color: #3eceff;
+            color: #3eceff;
+            background: #f3fbff;
+        }
+        QPushButton#uploadEntryBtn,
+        QPushButton#myVideoEntryBtn,
+        QPushButton#followEntryBtn,
+        QPushButton#settingEntryBtn {
+            border: 1px solid #eef2f7;
+            border-radius: 8px;
+            color: #111827;
+            background: #ffffff;
+            font-size: 15px;
+            font-weight: 600;
+            padding-left: 18px;
+            padding-right: 18px;
+        }
+        QPushButton#uploadEntryBtn:hover,
+        QPushButton#myVideoEntryBtn:hover,
+        QPushButton#followEntryBtn:hover,
+        QPushButton#settingEntryBtn:hover {
+            border-color: #3eceff;
+            background: #f3fbff;
         }
     )");
 
