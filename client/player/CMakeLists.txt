@@ -26,6 +26,7 @@ qt_add_executable(player
     imageRes.qrc
     pageswitchbutton.h pageswitchbutton.cpp
     videobox.h videobox.cpp videobox.ui
+    playerpage.h playerpage.cpp playerpage.ui
     util.h
 
 )

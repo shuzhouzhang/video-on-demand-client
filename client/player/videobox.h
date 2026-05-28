@@ -28,9 +28,23 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
+signals:
+    // VideoBox 不直接创建播放页，只把点击事件和视频数据发给外层页面处理。
+    void videoClicked(const QString &title,
+                      const QString &userName,
+                      const QString &date,
+                      const QString &duration,
+                      const QString &playCount,
+                      const QString &likeCount);
+
 private:
     Ui::VideoBox *ui;
     QString m_title;
+    QString m_userName;
+    QString m_date;
+    QString m_duration;
+    QString m_playCount;
+    QString m_likeCount;
 };
 
 #endif // VIDEOBOX_H

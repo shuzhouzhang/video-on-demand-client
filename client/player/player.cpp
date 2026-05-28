@@ -3,6 +3,7 @@
 #include "player.h"
 #include "ui_player.h"
 #include "pageswitchbutton.h"
+#include "playerpage.h"
 #include "util.h"
 #include "videobox.h"
 
@@ -160,6 +161,21 @@ void player::initUI()
                                video.duration,
                                video.playCount,
                                video.likeCount);
+
+        connect(videoBox,
+                &VideoBox::videoClicked,
+                this,
+                [](const QString &title,
+                   const QString &userName,
+                   const QString &date,
+                   const QString &duration,
+                   const QString &playCount,
+                   const QString &likeCount) {
+                    auto *playerPage = new PlayerPage(title, userName, date, duration, playCount, likeCount);
+                    playerPage->setAttribute(Qt::WA_DeleteOnClose);
+                    playerPage->show();
+                });
+
         ui->videoScrollLayout->addWidget(videoBox, i / 4, i % 4);
     }
 
