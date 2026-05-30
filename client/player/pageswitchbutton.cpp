@@ -1,4 +1,7 @@
+// pageswitchbutton.cpp 实现左侧导航按钮。
+// 它负责显示图标和文字，并在点击时发出 clicked() 信号给主窗口切换页面。
 #include "pageswitchbutton.h"
+#include "util.h"
 
 #include <QEvent>
 #include <QHBoxLayout>
@@ -23,7 +26,7 @@ PageSwitchButton::PageSwitchButton(QWidget *parent)
     // 左边的 QLabel 用来显示图片。QLabel 既能显示文字，也能显示 QPixmap 图片。
     m_iconLabel = new QLabel(this);
     m_iconLabel->setObjectName("pageSwitchButtonIcon");
-    m_iconLabel->setFixedSize(24, 24);
+    m_iconLabel->setFixedSize(26, 26);
     m_iconLabel->setAlignment(Qt::AlignCenter);
     m_iconLabel->setScaledContents(true);
 
@@ -36,10 +39,10 @@ PageSwitchButton::PageSwitchButton(QWidget *parent)
     m_textLabel->setAlignment(Qt::AlignCenter);
     m_textLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
-    // 水平布局：先放图片 QLabel，再放文字 QLabel。
+    // 垂直布局：上面放图片 QLabel，下面放文字 QLabel，对齐原型图左侧导航样式。
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 6, 0, 6);
-    layout->setSpacing(4);
+    layout->setContentsMargins(0, 4, 0, 4);
+    layout->setSpacing(6);
     layout->addWidget(m_iconLabel, 0, Qt::AlignCenter);
     layout->addWidget(m_textLabel, 0, Qt::AlignCenter);
 
@@ -57,7 +60,7 @@ PageSwitchButton::PageSwitchButton(QWidget *parent)
         }
         QLabel#pageSwitchButtonText {
             color: #73777f;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
             background: transparent;
         }
@@ -109,6 +112,7 @@ void PageSwitchButton::setChecked(bool checked)
         return;
     }
 
+    // checked 存在 C++ 成员里，也同步到 Qt 动态属性里，方便 QSS 根据状态改样式。
     m_checked = checked;
     setProperty("checked", checked);
     refreshStyle();
@@ -139,6 +143,7 @@ void PageSwitchButton::mousePressEvent(QMouseEvent *event)
 {
     // 只响应鼠标左键。点击后发出 clicked()，外部就能切换页面。
     if (event->button() == Qt::LeftButton) {
+        LOG() << "导航按钮被点击:" << text();
         emit clicked();
         event->accept();
         return;
