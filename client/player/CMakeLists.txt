@@ -28,6 +28,7 @@ qt_add_executable(player
     videobox.h videobox.cpp videobox.ui
     playerpage.h playerpage.cpp playerpage.ui
     login.h login.cpp login.ui
+    uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui
     util.h
 
 )

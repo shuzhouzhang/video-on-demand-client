@@ -5,6 +5,7 @@
 #include "ui_player.h"
 #include "pageswitchbutton.h"
 #include "playerpage.h"
+#include "uploadvideopage.h"
 #include "util.h"
 #include "videobox.h"
 
@@ -200,6 +201,9 @@ void player::initUI()
     ui->settingEntryBtn->setIcon(QIcon(":/images/myself/shezhi.png"));
     ui->settingEntryBtn->setIconSize(QSize(28, 28));
 
+    m_uploadVideoPage = new UploadVideoPage(ui->stackedWidget);
+    ui->stackedWidget->addWidget(m_uploadVideoPage);
+
     auto refreshButtonStyle = [](QPushButton *button) {
         button->style()->unpolish(button);
         button->style()->polish(button);
@@ -296,7 +300,7 @@ void player::initUI()
     auto switchNavButton = [this](int index) {
         // 左侧导航按钮和右侧页面栈保持同一个 index，后续扩展新页面也更直观。
         ui->stackedWidget->setCurrentIndex(index);
-        const QStringList pageNames = {"首页", "我的", "后台"};
+        const QStringList pageNames = {"Home", "My", "Admin", "Upload"};
         LOG() << "切换页面:" << pageNames.value(index, "未知页面");
 
         // 首页按钮：index 为 0 时使用选中图标，否则使用普通图标。
@@ -306,8 +310,8 @@ void player::initUI()
                                              : ":/images/homePage/shouye.png"));
 
         // 我的按钮：index 为 1 时使用选中图标，否则使用普通图标。
-        ui->myPageBtn->setChecked(index == 1);
-        ui->myPageBtn->setIcon(QPixmap(index == 1
+        ui->myPageBtn->setChecked(index == 1 || index == 3);
+        ui->myPageBtn->setIcon(QPixmap((index == 1 || index == 3)
                                            ? ":/images/homePage/wodexuan.png"
                                            : ":/images/homePage/wode.png"));
 
@@ -330,6 +334,9 @@ void player::initUI()
     });
     connect(ui->sysPageBtn, &PageSwitchButton::clicked, this, [switchNavButton]() {
         switchNavButton(2);
+    });
+    connect(m_uploadVideoPage, &UploadVideoPage::backToMyPage, this, [switchNavButton]() {
+        switchNavButton(1);
     });
 
     // 无边框窗口没有系统标题栏，右上角窗口按钮需要自己接系统行为。
@@ -387,6 +394,35 @@ void player::initUI()
             showLoginWindow();
             return;
         }
+
+        const QString fileName = QFileDialog::getOpenFileName(this,
+                                                              "上传视频",
+                                                              QString(),
+                                                              "Videos (*.mp4 *.rmvb *.avi *.mov)");
+        if (fileName.isEmpty()) {
+            LOG() << "取消选择上传视频文件";
+            return;
+        }
+
+        const QFileInfo fileInfo(fileName);
+        constexpr qint64 maxVideoSize = 4LL * 1024 * 1024 * 1024;
+        if (fileInfo.size() > maxVideoSize) {
+            QMessageBox::warning(this, "上传视频", "视频大小不能超过 4GB");
+            LOG() << "上传视频文件超过 4GB:" << fileName << fileInfo.size();
+            return;
+        }
+
+        m_uploadVideoPage->resetPage();
+        m_uploadVideoPage->setVideoFile(fileName);
+        ui->stackedWidget->setCurrentWidget(m_uploadVideoPage);
+        ui->homePageBtn->setChecked(false);
+        ui->homePageBtn->setIcon(QPixmap(":/images/homePage/shouye.png"));
+        ui->myPageBtn->setChecked(true);
+        ui->myPageBtn->setIcon(QPixmap(":/images/homePage/wodexuan.png"));
+        ui->sysPageBtn->setChecked(false);
+        ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
+        LOG() << "进入上传视频页面:" << fileName;
+        return;
 
         LOG() << "点击上传视频入口，当前阶段暂不打开上传页";
     });
