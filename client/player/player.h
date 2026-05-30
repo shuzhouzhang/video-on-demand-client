@@ -4,9 +4,13 @@
 #define PLAYER_H
 
 #include <QPoint>
+#include <QString>
 #include <QWidget>
 
+class Login;
+class QEvent;
 class QMouseEvent;
+class QObject;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -28,10 +32,13 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     // 初始化主界面。
     void initUI();
+    void showLoginWindow();
+    void updateLoginState(const QString &userName, const QString &account);
 
 private:
     // ui 指向 Qt Designer 生成的界面对象，控件都从这里访问。
@@ -43,6 +50,12 @@ private:
     // 记录鼠标点下去的位置到窗口左上角的距离。
     // 窗口移动时要靠它计算新位置。
     QPoint m_dragOffset;
+
+    // 第一版登录只保存前端状态，后续接后端时再替换为真实 session/token。
+    bool m_isLoggedIn = false;
+    QString m_loginUserName;
+    QString m_loginAccount;
+    Login *m_loginWindow = nullptr;
 };
 
 #endif // PLAYER_H

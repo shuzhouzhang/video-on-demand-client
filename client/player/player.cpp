@@ -1,24 +1,57 @@
 // player.cpp 实现主窗口逻辑。
 // 这里负责初始化 UI、连接按钮事件、切换右侧页面，以及处理无边框窗口拖拽。
 #include "player.h"
+#include "login.h"
 #include "ui_player.h"
 #include "pageswitchbutton.h"
 #include "playerpage.h"
 #include "util.h"
 #include "videobox.h"
 
+#include <QEvent>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QList>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QStringList>
 #include <QStyle>
 #include <QVBoxLayout>
+
+namespace {
+QIcon makeCircleAvatarIcon(const QPixmap &source, int size)
+{
+    if (source.isNull()) {
+        return {};
+    }
+
+    const QPixmap scaled = source.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    const int x = (scaled.width() - size) / 2;
+    const int y = (scaled.height() - size) / 2;
+    const QPixmap cropped = scaled.copy(x, y, size, size);
+
+    QPixmap circle(size, size);
+    circle.fill(Qt::transparent);
+
+    QPainter painter(&circle);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPainterPath path;
+    path.addEllipse(0, 0, size, size);
+    painter.setClipPath(path);
+    painter.drawPixmap(0, 0, cropped);
+
+    return QIcon(circle);
+}
+}
 
 player::player(QWidget *parent)
     : QWidget(parent)
@@ -66,6 +99,53 @@ void player::mouseReleaseEvent(QMouseEvent *event)
     QWidget::mouseReleaseEvent(event);
 }
 
+bool player::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == ui->myNickNameLabel && event->type() == QEvent::MouseButtonRelease) {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return true;
+        }
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+void player::showLoginWindow()
+{
+    if (m_isLoggedIn) {
+        return;
+    }
+
+    if (m_loginWindow == nullptr) {
+        m_loginWindow = new Login(this);
+        m_loginWindow->setAttribute(Qt::WA_DeleteOnClose);
+
+        connect(m_loginWindow, &Login::loginSuccess, this, &player::updateLoginState);
+        connect(m_loginWindow, &QObject::destroyed, this, [this]() {
+            m_loginWindow = nullptr;
+        });
+    }
+
+    m_loginWindow->reset();
+    m_loginWindow->show();
+    m_loginWindow->raise();
+    m_loginWindow->activateWindow();
+}
+
+void player::updateLoginState(const QString &userName, const QString &account)
+{
+    m_isLoggedIn = true;
+    m_loginUserName = userName;
+    m_loginAccount = account;
+
+    ui->myNickNameLabel->setText(userName);
+    ui->myAccountLabel->setText("账号：" + account);
+    ui->myDescLabel->setText("欢迎回来，开始管理你的个人资料和视频内容吧");
+
+    LOG() << "我的页面已切换到登录状态:" << account;
+}
+
 void player::initUI()
 {
     // setupUi() 会读取 player.ui 生成的界面结构，并把控件挂到 ui 指针上。
@@ -87,7 +167,27 @@ void player::initUI()
     ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
 
     // 我的页面第一版只展示静态个人中心，先用本地资源和假数据把结构搭起来。
-    ui->myAvatarBtn->setStyleSheet("border: none; border-image: url(:/images/myself/defaultAvatar.png);");
+    auto setMyAvatar = [this](const QPixmap &pixmap) {
+        ui->myAvatarBtn->setStyleSheet(R"(
+            QPushButton#myAvatarBtn {
+                border: none;
+                border-radius: 48px;
+                background: #ffffff;
+            }
+            QPushButton#myAvatarBtn:hover {
+                background: #f3fbff;
+            }
+        )");
+        ui->myAvatarBtn->setIcon(makeCircleAvatarIcon(pixmap, 96));
+        ui->myAvatarBtn->setIconSize(QSize(96, 96));
+    };
+    setMyAvatar(QPixmap(":/images/myself/defaultAvatar.png"));
+    ui->myNickNameLabel->setText("点击登录");
+    ui->myAccountLabel->setText("游客模式");
+    ui->myDescLabel->setText("登录后可以修改资料、上传视频和查看个人内容");
+    ui->myNickNameLabel->setCursor(Qt::PointingHandCursor);
+    ui->myNickNameLabel->installEventFilter(this);
+
     ui->editProfileBtn->setIcon(QIcon(":/images/myself/bianji.png"));
     ui->editProfileBtn->setIconSize(QSize(16, 16));
 
@@ -242,19 +342,76 @@ void player::initUI()
     connect(ui->searchBtn, &QPushButton::clicked, this, [this]() {
         LOG() << "点击搜索按钮，关键词:" << ui->searchEdit->text();
     });
-    connect(ui->editProfileBtn, &QPushButton::clicked, this, []() {
+    connect(ui->myAvatarBtn, &QPushButton::clicked, this, [this, setMyAvatar]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
+        const QString fileName = QFileDialog::getOpenFileName(this,
+                                                              "修改头像",
+                                                              QString(),
+                                                              "Images (*.png *.jpg *.jpeg)");
+        if (fileName.isEmpty()) {
+            LOG() << "取消选择头像文件";
+            return;
+        }
+
+        const QFileInfo fileInfo(fileName);
+        if (fileInfo.size() >= 1024 * 1024 * 5) {
+            QMessageBox::warning(this, "修改头像", "头像大小不能超过 5MB");
+            LOG() << "头像大小超过限制:" << fileName << fileInfo.size();
+            return;
+        }
+
+        const QPixmap avatar(fileName);
+        if (avatar.isNull()) {
+            QMessageBox::warning(this, "修改头像", "头像图片读取失败");
+            LOG() << "头像图片读取失败:" << fileName;
+            return;
+        }
+
+        setMyAvatar(avatar);
+        LOG() << "本地头像预览已更新:" << fileName;
+    });
+    connect(ui->editProfileBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
         LOG() << "点击编辑资料按钮，当前阶段暂不打开编辑资料页";
     });
-    connect(ui->uploadEntryBtn, &QPushButton::clicked, this, []() {
+    connect(ui->uploadEntryBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
         LOG() << "点击上传视频入口，当前阶段暂不打开上传页";
     });
-    connect(ui->myVideoEntryBtn, &QPushButton::clicked, this, []() {
+    connect(ui->myVideoEntryBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
         LOG() << "点击我的视频入口，当前阶段暂不加载作品列表";
     });
-    connect(ui->followEntryBtn, &QPushButton::clicked, this, []() {
+    connect(ui->followEntryBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
         LOG() << "点击我的关注入口，当前阶段暂不加载关注列表";
     });
-    connect(ui->settingEntryBtn, &QPushButton::clicked, this, []() {
+    connect(ui->settingEntryBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_isLoggedIn) {
+            showLoginWindow();
+            return;
+        }
+
         LOG() << "点击设置入口，当前阶段暂不打开设置页";
     });
 
