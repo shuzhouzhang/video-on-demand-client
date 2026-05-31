@@ -1123,6 +1123,28 @@
                 </item>
                </layout>
               </widget>
+              <widget class="QWidget" name="uploadPage">
+               <layout class="QVBoxLayout" name="uploadPageLayout">
+                <property name="spacing">
+                 <number>0</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="UploadVideoPage" name="uploadVideoPage" native="true"/>
+                </item>
+               </layout>
+              </widget>
              </widget>
             </item>
            </layout>
@@ -1141,6 +1163,12 @@
    <class>PageSwitchButton</class>
    <extends>QWidget</extends>
    <header>pageswitchbutton.h</header>
+  </customwidget>
+  <customwidget>
+   <class>UploadVideoPage</class>
+   <extends>QWidget</extends>
+   <header>uploadvideopage.h</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

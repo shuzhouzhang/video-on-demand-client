@@ -34,6 +34,7 @@ private:
     void updateTags(const QString &category);
     void updateTitleCount(const QString &text);
     void updateDescCount();
+    void chooseVideo();
     void chooseCover();
     void commitUpload();
     int selectedTagCount() const;

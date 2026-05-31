@@ -11,7 +11,6 @@ class Login;
 class QEvent;
 class QMouseEvent;
 class QObject;
-class UploadVideoPage;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -57,7 +56,6 @@ private:
     QString m_loginUserName;
     QString m_loginAccount;
     Login *m_loginWindow = nullptr;
-    UploadVideoPage *m_uploadVideoPage = nullptr;
 };
 
 #endif // PLAYER_H

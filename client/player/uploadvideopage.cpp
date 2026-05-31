@@ -81,6 +81,7 @@ void UploadVideoPage::initUI()
 
     connect(ui->videoTitleEdit, &QLineEdit::textChanged, this, &UploadVideoPage::updateTitleCount);
     connect(ui->descEdit, &QPlainTextEdit::textChanged, this, &UploadVideoPage::updateDescCount);
+    connect(ui->selectVideoBtn, &QPushButton::clicked, this, &UploadVideoPage::chooseVideo);
     connect(ui->changeCoverBtn, &QPushButton::clicked, this, &UploadVideoPage::chooseCover);
     connect(ui->kindCombo, &QComboBox::currentTextChanged, this, &UploadVideoPage::updateTags);
     connect(ui->backBtn, &QPushButton::clicked, this, [this]() {
@@ -172,6 +173,7 @@ void UploadVideoPage::initUI()
             color: #0ea5d7;
             background: #f3fbff;
         }
+        QPushButton#selectVideoBtn,
         QPushButton#changeCoverBtn,
         QPushButton#backBtn {
             border: 1px solid #dbe7f0;
@@ -181,6 +183,7 @@ void UploadVideoPage::initUI()
             font-size: 14px;
             font-weight: 600;
         }
+        QPushButton#selectVideoBtn:hover,
         QPushButton#changeCoverBtn:hover,
         QPushButton#backBtn:hover {
             border-color: #3eceff;
@@ -263,6 +266,28 @@ void UploadVideoPage::updateDescCount()
     }
 
     ui->descCountLabel->setText(QString("%1/1000").arg(text.length()));
+}
+
+void UploadVideoPage::chooseVideo()
+{
+    const QString fileName = QFileDialog::getOpenFileName(this,
+                                                          "上传视频",
+                                                          QString(),
+                                                          "Videos (*.mp4 *.rmvb *.avi *.mov)");
+    if (fileName.isEmpty()) {
+        LOG() << "取消选择上传视频文件";
+        return;
+    }
+
+    const QFileInfo fileInfo(fileName);
+    constexpr qint64 maxVideoSize = 4LL * 1024 * 1024 * 1024;
+    if (fileInfo.size() > maxVideoSize) {
+        QMessageBox::warning(this, "上传视频", "视频大小不能超过 4GB");
+        LOG() << "上传视频文件超过 4GB:" << fileName << fileInfo.size();
+        return;
+    }
+
+    setVideoFile(fileName);
 }
 
 void UploadVideoPage::chooseCover()
