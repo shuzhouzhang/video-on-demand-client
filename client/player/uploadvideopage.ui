@@ -197,6 +197,28 @@
           </spacer>
          </item>
          <item>
+          <widget class="QPushButton" name="selectVideoBtn">
+           <property name="minimumSize">
+            <size>
+             <width>108</width>
+             <height>36</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>108</width>
+             <height>36</height>
+            </size>
+           </property>
+           <property name="cursor">
+            <cursorShape>PointingHandCursor</cursorShape>
+           </property>
+           <property name="text">
+            <string>选择视频</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QLabel" name="downIconLabel">
            <property name="minimumSize">
             <size>

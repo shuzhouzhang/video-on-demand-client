@@ -201,9 +201,6 @@ void player::initUI()
     ui->settingEntryBtn->setIcon(QIcon(":/images/myself/shezhi.png"));
     ui->settingEntryBtn->setIconSize(QSize(28, 28));
 
-    m_uploadVideoPage = new UploadVideoPage(ui->stackedWidget);
-    ui->stackedWidget->addWidget(m_uploadVideoPage);
-
     auto refreshButtonStyle = [](QPushButton *button) {
         button->style()->unpolish(button);
         button->style()->polish(button);
@@ -335,7 +332,7 @@ void player::initUI()
     connect(ui->sysPageBtn, &PageSwitchButton::clicked, this, [switchNavButton]() {
         switchNavButton(2);
     });
-    connect(m_uploadVideoPage, &UploadVideoPage::backToMyPage, this, [switchNavButton]() {
+    connect(ui->uploadVideoPage, &UploadVideoPage::backToMyPage, this, [switchNavButton]() {
         switchNavButton(1);
     });
 
@@ -395,36 +392,15 @@ void player::initUI()
             return;
         }
 
-        const QString fileName = QFileDialog::getOpenFileName(this,
-                                                              "上传视频",
-                                                              QString(),
-                                                              "Videos (*.mp4 *.rmvb *.avi *.mov)");
-        if (fileName.isEmpty()) {
-            LOG() << "取消选择上传视频文件";
-            return;
-        }
-
-        const QFileInfo fileInfo(fileName);
-        constexpr qint64 maxVideoSize = 4LL * 1024 * 1024 * 1024;
-        if (fileInfo.size() > maxVideoSize) {
-            QMessageBox::warning(this, "上传视频", "视频大小不能超过 4GB");
-            LOG() << "上传视频文件超过 4GB:" << fileName << fileInfo.size();
-            return;
-        }
-
-        m_uploadVideoPage->resetPage();
-        m_uploadVideoPage->setVideoFile(fileName);
-        ui->stackedWidget->setCurrentWidget(m_uploadVideoPage);
+        ui->uploadVideoPage->resetPage();
+        ui->stackedWidget->setCurrentWidget(ui->uploadPage);
         ui->homePageBtn->setChecked(false);
         ui->homePageBtn->setIcon(QPixmap(":/images/homePage/shouye.png"));
         ui->myPageBtn->setChecked(true);
         ui->myPageBtn->setIcon(QPixmap(":/images/homePage/wodexuan.png"));
         ui->sysPageBtn->setChecked(false);
         ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
-        LOG() << "进入上传视频页面:" << fileName;
-        return;
-
-        LOG() << "点击上传视频入口，当前阶段暂不打开上传页";
+        LOG() << "进入上传视频页面";
     });
     connect(ui->myVideoEntryBtn, &QPushButton::clicked, this, [this]() {
         if (!m_isLoggedIn) {
