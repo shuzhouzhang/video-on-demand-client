@@ -1090,33 +1090,32 @@
                   <property name="orientation">
                    <enum>Qt::Vertical</enum>
                   </property>
+                  <property name="sizeType">
+                   <enum>QSizePolicy::Fixed</enum>
+                  </property>
                   <property name="sizeHint" stdset="0">
                    <size>
                     <width>20</width>
-                    <height>40</height>
+                    <height>0</height>
                    </size>
                   </property>
                  </spacer>
                 </item>
                 <item>
-                 <widget class="QLabel" name="adminPageLabel">
-                  <property name="text">
-                   <string>后台页面</string>
-                  </property>
-                  <property name="alignment">
-                   <set>Qt::AlignCenter</set>
-                  </property>
-                 </widget>
+                 <widget class="AdminWidget" name="adminWidget" native="true"/>
                 </item>
                 <item>
                  <spacer name="adminPageBottomSpacer">
                   <property name="orientation">
                    <enum>Qt::Vertical</enum>
                   </property>
+                  <property name="sizeType">
+                   <enum>QSizePolicy::Fixed</enum>
+                  </property>
                   <property name="sizeHint" stdset="0">
                    <size>
                     <width>20</width>
-                    <height>40</height>
+                    <height>0</height>
                    </size>
                   </property>
                  </spacer>
@@ -1168,6 +1167,12 @@
    <class>UploadVideoPage</class>
    <extends>QWidget</extends>
    <header>uploadvideopage.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>AdminWidget</class>
+   <extends>QWidget</extends>
+   <header>adminwidget.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>
