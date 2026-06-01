@@ -29,6 +29,7 @@ qt_add_executable(player
     playerpage.h playerpage.cpp playerpage.ui
     login.h login.cpp login.ui
     uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui
+    adminwidget.h adminwidget.cpp adminwidget.ui
     util.h
 
 )
