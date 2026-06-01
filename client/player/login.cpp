@@ -4,10 +4,52 @@
 #include "ui_login.h"
 #include "util.h"
 
+#include <QHBoxLayout>
+#include <QHash>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QPushButton>
+#include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QSizePolicy>
+#include <QStyle>
+#include <QVBoxLayout>
 
 namespace {
+struct AccountInfo {
+    QString nickname;
+    QString password;
+};
+
+QHash<QString, AccountInfo> &accountStore()
+{
+    static QHash<QString, AccountInfo> users = {
+        {"bit-user-001", {"BIT 用户", "bit123456"}},
+    };
+    return users;
+}
+
+QString accountRuleError(const QString &account)
+{
+    if (account.isEmpty()) {
+        return "账号不能为空";
+    }
+
+    if (account.length() < 3 || account.length() > 32) {
+        return "账号长度需要在 3 到 32 位之间";
+    }
+
+    return {};
+}
+
+bool isEmailValid(const QString &email)
+{
+    static const QRegularExpression pattern(R"(^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$)");
+    return pattern.match(email).hasMatch();
+}
+
 QString passwordRuleError(const QString &password)
 {
     if (password.isEmpty()) {
@@ -35,6 +77,22 @@ QString passwordRuleError(const QString &password)
 
     return {};
 }
+
+QString nicknameFromEmail(const QString &email)
+{
+    const int atIndex = email.indexOf('@');
+    if (atIndex <= 0) {
+        return email;
+    }
+
+    return email.left(atIndex);
+}
+
+QString makeAuthcode()
+{
+    const int value = QRandomGenerator::global()->bounded(0, 1000000);
+    return QString("%1").arg(value, 6, 10, QLatin1Char('0'));
+}
 }
 
 Login::Login(QWidget *parent)
@@ -51,9 +109,9 @@ Login::~Login()
 
 void Login::reset()
 {
-    ui->accountEdit->clear();
-    ui->passwordEdit->clear();
-    ui->accountEdit->setFocus();
+    switchMode(Mode::Email);
+    clearInputs();
+    m_emailEdit->setFocus();
 }
 
 void Login::mousePressEvent(QMouseEvent *event)
@@ -97,7 +155,55 @@ void Login::initUI()
     setFixedSize(430, 520);
 
     ui->logoLabel->setStyleSheet("border-image: url(:/images/login/biteshipin.png);");
+    ui->accountEdit->setPlaceholderText("请输入邮箱或用户昵称");
     ui->passwordEdit->setEchoMode(QLineEdit::Password);
+
+    auto *modeWidget = new QWidget(this);
+    auto *modeLayout = new QHBoxLayout(modeWidget);
+    modeLayout->setContentsMargins(0, 0, 0, 0);
+    modeLayout->setSpacing(0);
+
+    m_passwordModeBtn = new QPushButton("密码登录", modeWidget);
+    m_passwordModeBtn->setObjectName("loginModeButton");
+    m_passwordModeBtn->setCursor(Qt::PointingHandCursor);
+    m_passwordModeBtn->setMinimumHeight(38);
+
+    m_emailModeBtn = new QPushButton("邮箱登录", modeWidget);
+    m_emailModeBtn->setObjectName("loginModeButton");
+    m_emailModeBtn->setCursor(Qt::PointingHandCursor);
+    m_emailModeBtn->setMinimumHeight(38);
+
+    modeLayout->addWidget(m_passwordModeBtn);
+    modeLayout->addWidget(m_emailModeBtn);
+
+    m_emailLabel = new QLabel("邮箱", this);
+    m_emailLabel->setObjectName("emailLabel");
+    m_emailEdit = new QLineEdit(this);
+    m_emailEdit->setObjectName("emailEdit");
+    m_emailEdit->setPlaceholderText("请输入邮箱");
+
+    m_authcodeBtn = new QPushButton("获取验证码", this);
+    m_authcodeBtn->setObjectName("authcodeBtn");
+    m_authcodeBtn->setCursor(Qt::PointingHandCursor);
+    m_authcodeBtn->setMinimumHeight(34);
+
+    m_authcodeLabel = new QLabel("验证码", this);
+    m_authcodeLabel->setObjectName("authcodeLabel");
+    m_authcodeEdit = new QLineEdit(this);
+    m_authcodeEdit->setObjectName("authcodeEdit");
+    m_authcodeEdit->setPlaceholderText("请输入验证码");
+    m_authcodeEdit->setMaxLength(6);
+
+    const int accountLabelIndex = ui->cardLayout->indexOf(ui->accountLabel);
+    ui->cardLayout->insertWidget(accountLabelIndex, modeWidget);
+    ui->cardLayout->insertWidget(accountLabelIndex + 1, m_emailLabel);
+    ui->cardLayout->insertWidget(accountLabelIndex + 2, m_emailEdit);
+    ui->cardLayout->insertWidget(accountLabelIndex + 3, m_authcodeBtn);
+    ui->cardLayout->insertWidget(accountLabelIndex + 4, m_authcodeLabel);
+    ui->cardLayout->insertWidget(accountLabelIndex + 5, m_authcodeEdit);
+
+    ui->accountBottomSpacer->changeSize(20, 18, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    ui->passwordBottomSpacer->changeSize(20, 24, QSizePolicy::Minimum, QSizePolicy::Fixed);
 
     ui->minBtn->setFlat(true);
     ui->quitBtn->setFlat(true);
@@ -105,9 +211,18 @@ void Login::initUI()
     connect(ui->minBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(ui->quitBtn, &QPushButton::clicked, this, &QWidget::close);
     connect(ui->loginBtn, &QPushButton::clicked, this, &Login::onLoginButtonClicked);
-    connect(ui->registerBtn, &QPushButton::clicked, this, []() {
-        LOG() << "点击立即注册，当前阶段仅作为占位";
+    connect(ui->registerBtn, &QPushButton::clicked, this, &Login::onRegisterButtonClicked);
+    connect(m_authcodeBtn, &QPushButton::clicked, this, &Login::onAuthcodeButtonClicked);
+    connect(m_passwordModeBtn, &QPushButton::clicked, this, [this]() {
+        switchMode(Mode::Password);
     });
+    connect(m_emailModeBtn, &QPushButton::clicked, this, [this]() {
+        switchMode(Mode::Email);
+    });
+    connect(ui->accountEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
+    connect(ui->passwordEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
+    connect(m_emailEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
+    connect(m_authcodeEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
 
     setStyleSheet(R"(
         QWidget#Login {
@@ -129,7 +244,9 @@ void Login::initUI()
             font-size: 13px;
         }
         QLabel#accountLabel,
-        QLabel#passwordLabel {
+        QLabel#passwordLabel,
+        QLabel#emailLabel,
+        QLabel#authcodeLabel {
             color: #374151;
             font-size: 14px;
             font-weight: 600;
@@ -146,6 +263,31 @@ void Login::initUI()
         }
         QLineEdit:focus {
             border-color: #3eceff;
+        }
+        QPushButton#loginModeButton {
+            border: none;
+            border-bottom: 2px solid #b5ecff;
+            color: #374151;
+            background: transparent;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        QPushButton#loginModeButton[selected="true"] {
+            border-bottom: 4px solid #3eceff;
+            color: #3eceff;
+            font-weight: 700;
+        }
+        QPushButton#authcodeBtn {
+            border: 1px solid #dbe7f0;
+            border-radius: 17px;
+            color: #3eceff;
+            background: #ffffff;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#authcodeBtn:hover {
+            border-color: #3eceff;
+            background: #f3fbff;
         }
         QPushButton#loginBtn {
             border: none;
@@ -177,27 +319,177 @@ void Login::initUI()
             border-image: url(:/images/login/quxiao.png);
         }
     )");
+
+    switchMode(Mode::Email);
 }
 
 void Login::onLoginButtonClicked()
 {
+    if (m_mode == Mode::Email) {
+        const QString email = m_emailEdit->text().trimmed();
+        const QString authcode = m_authcodeEdit->text().trimmed();
+
+        if (email.isEmpty()) {
+            QMessageBox::warning(this, "邮箱登录", "邮箱不能为空");
+            m_emailEdit->setFocus();
+            return;
+        }
+
+        if (!isEmailValid(email)) {
+            QMessageBox::warning(this, "邮箱登录", "邮箱格式错误");
+            m_emailEdit->setFocus();
+            return;
+        }
+
+        if (authcode.isEmpty()) {
+            QMessageBox::warning(this, "邮箱登录", "验证码不能为空");
+            m_authcodeEdit->setFocus();
+            return;
+        }
+
+        if (authcode.length() != 6) {
+            QMessageBox::warning(this, "邮箱登录", "验证码格式错误");
+            m_authcodeEdit->setFocus();
+            return;
+        }
+
+        if (m_authcodeId.isEmpty() || email != m_authcodeEmail || authcode != m_authcodeValue) {
+            QMessageBox::warning(this, "邮箱登录", "验证码错误或已失效，请重新获取");
+            m_authcodeEdit->setFocus();
+            return;
+        }
+
+        auto &users = accountStore();
+        if (!users.contains(email)) {
+            users.insert(email, {nicknameFromEmail(email), {}});
+            LOG() << "本地邮箱注册成功，邮箱:" << email;
+        }
+
+        const AccountInfo user = users.value(email);
+        LOG() << "本地邮箱登录成功，邮箱:" << email << "昵称:" << user.nickname;
+        emit loginSuccess(user.nickname, email);
+        close();
+        return;
+    }
+
     const QString account = ui->accountEdit->text().trimmed();
     const QString password = ui->passwordEdit->text();
 
-    if (account.isEmpty()) {
-        QMessageBox::warning(this, "登录", "账号不能为空");
+    const QString accountError = accountRuleError(account);
+    if (!accountError.isEmpty()) {
+        QMessageBox::warning(this, "密码登录", accountError);
         ui->accountEdit->setFocus();
         return;
     }
 
     const QString passwordError = passwordRuleError(password);
     if (!passwordError.isEmpty()) {
-        QMessageBox::warning(this, "登录", passwordError);
+        QMessageBox::warning(this, "密码登录", passwordError);
         ui->passwordEdit->setFocus();
         return;
     }
 
-    LOG() << "静态登录成功，账号:" << account;
-    emit loginSuccess(account, account);
+    const auto &users = accountStore();
+    const auto user = users.constFind(account);
+    if (user == users.constEnd() || user->password != password) {
+        QMessageBox::warning(this, "密码登录", "账号或密码错误");
+        ui->passwordEdit->setFocus();
+        return;
+    }
+
+    LOG() << "本地登录成功，账号:" << account << "昵称:" << user->nickname;
+    emit loginSuccess(user->nickname, account);
     close();
+}
+
+void Login::onRegisterButtonClicked()
+{
+    switchMode(Mode::Email);
+    m_emailEdit->setFocus();
+    LOG() << "点击立即注册，切换到邮箱登录/注册入口";
+}
+
+void Login::onAuthcodeButtonClicked()
+{
+    const QString email = m_emailEdit->text().trimmed();
+    if (email.isEmpty()) {
+        QMessageBox::warning(this, "获取验证码", "邮箱不能为空");
+        m_emailEdit->setFocus();
+        return;
+    }
+
+    if (!isEmailValid(email)) {
+        QMessageBox::warning(this, "获取验证码", "邮箱格式错误");
+        m_emailEdit->setFocus();
+        return;
+    }
+
+    m_authcodeEmail = email;
+    m_authcodeValue = makeAuthcode();
+    m_authcodeId = QString("local-%1").arg(QRandomGenerator::global()->generate());
+    m_authcodeEdit->clear();
+    m_authcodeEdit->setFocus();
+
+    LOG() << "本地验证码已生成:" << email << m_authcodeValue << m_authcodeId;
+    QMessageBox::information(this, "获取验证码", "本地验证码：" + m_authcodeValue);
+}
+
+void Login::switchMode(Mode mode)
+{
+    m_mode = mode;
+    const bool isEmailMode = m_mode == Mode::Email;
+
+    setFixedSize(430, 560);
+    ui->titleLabel->setText(isEmailMode ? "邮箱登录" : "密码登录");
+    ui->subTitleLabel->setText(isEmailMode ? "输入邮箱验证码即可登录或注册"
+                                           : "使用邮箱或用户昵称和密码登录");
+    ui->loginBtn->setText(isEmailMode ? "登录/注册" : "登录");
+    ui->registerHintLabel->setText("还没有账号？");
+    ui->registerBtn->setText("立即注册");
+
+    ui->accountLabel->setVisible(!isEmailMode);
+    ui->accountEdit->setVisible(!isEmailMode);
+    ui->passwordLabel->setVisible(!isEmailMode);
+    ui->passwordEdit->setVisible(!isEmailMode);
+
+    m_emailLabel->setVisible(isEmailMode);
+    m_emailEdit->setVisible(isEmailMode);
+    m_authcodeBtn->setVisible(isEmailMode);
+    m_authcodeLabel->setVisible(isEmailMode);
+    m_authcodeEdit->setVisible(isEmailMode);
+
+    clearInputs();
+    refreshModeButtons();
+
+    if (isEmailMode) {
+        m_emailEdit->setFocus();
+    } else {
+        ui->accountEdit->setFocus();
+    }
+
+    LOG() << "登录窗口切换模式:" << (isEmailMode ? "邮箱登录" : "密码登录");
+}
+
+void Login::clearInputs()
+{
+    ui->accountEdit->clear();
+    ui->passwordEdit->clear();
+    m_emailEdit->clear();
+    m_authcodeEdit->clear();
+    m_authcodeId.clear();
+    m_authcodeValue.clear();
+    m_authcodeEmail.clear();
+}
+
+void Login::refreshModeButtons()
+{
+    const bool isEmailMode = m_mode == Mode::Email;
+    m_passwordModeBtn->setProperty("selected", !isEmailMode);
+    m_emailModeBtn->setProperty("selected", isEmailMode);
+
+    for (auto *button : {m_passwordModeBtn, m_emailModeBtn}) {
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+        button->update();
+    }
 }

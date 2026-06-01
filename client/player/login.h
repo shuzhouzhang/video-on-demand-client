@@ -7,6 +7,9 @@
 #include <QWidget>
 
 class QMouseEvent;
+class QLabel;
+class QLineEdit;
+class QPushButton;
 
 namespace Ui {
 class Login;
@@ -33,11 +36,32 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
+    enum class Mode {
+        Password,
+        Email
+    };
+
     void initUI();
     void onLoginButtonClicked();
+    void onRegisterButtonClicked();
+    void onAuthcodeButtonClicked();
+    void switchMode(Mode mode);
+    void clearInputs();
+    void refreshModeButtons();
 
 private:
     Ui::Login *ui;
+    QPushButton *m_passwordModeBtn = nullptr;
+    QPushButton *m_emailModeBtn = nullptr;
+    QLabel *m_emailLabel = nullptr;
+    QLineEdit *m_emailEdit = nullptr;
+    QPushButton *m_authcodeBtn = nullptr;
+    QLabel *m_authcodeLabel = nullptr;
+    QLineEdit *m_authcodeEdit = nullptr;
+    QString m_authcodeId;
+    QString m_authcodeValue;
+    QString m_authcodeEmail;
+    Mode m_mode = Mode::Email;
     bool m_isDragging = false;
     QPoint m_dragOffset;
 };
