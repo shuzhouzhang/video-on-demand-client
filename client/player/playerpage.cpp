@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QSlider>
 #include <QSize>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 PlayerPage::PlayerPage(const QString &title,
@@ -29,6 +30,8 @@ PlayerPage::PlayerPage(const QString &title,
 
 PlayerPage::~PlayerPage()
 {
+    delete m_mpvPlayer;
+    m_mpvPlayer = nullptr;
     delete ui;
 }
 
@@ -86,7 +89,11 @@ void PlayerPage::initUI(const QString &title,
     ui->playNum->setText(playCount);
     ui->likeNum->setText(likeCount);
     ui->timeLabel->setText("00:00 / " + duration);
+    ui->videoSlider->setRange(0, 1000);
+    ui->videoSlider->setValue(0);
     ui->videoDesc->setText("简介：这是一条视频简介占位内容，后续接入真实视频数据后会展示作者填写的视频说明。");
+
+    m_mpvPlayer = new MpvPlayer(ui->videoScreen, this);
 
     initSpeedMenu();
     initVolumePanel();
@@ -100,6 +107,11 @@ void PlayerPage::initUI(const QString &title,
 
     connect(ui->playBtn, &QPushButton::clicked, this, [this]() {
         m_isPlaying = !m_isPlaying;
+        if (m_isPlaying) {
+            m_mpvPlayer->play();
+        } else {
+            m_mpvPlayer->pause();
+        }
         updatePlayButton();
         LOG() << "播放页切换播放状态:" << m_title << (m_isPlaying ? "播放" : "暂停");
     });
@@ -118,6 +130,52 @@ void PlayerPage::initUI(const QString &title,
     connect(ui->volumeBtn, &QPushButton::clicked, this, [this]() {
         showVolumePanel();
     });
+
+    connect(ui->videoSlider, &QSlider::sliderPressed, this, [this]() {
+        m_isSliderPressed = true;
+    });
+
+    connect(ui->videoSlider, &QSlider::sliderReleased, this, [this]() {
+        m_isSliderPressed = false;
+        if (m_durationSeconds <= 0) {
+            return;
+        }
+
+        const int targetSeconds = ui->videoSlider->value() * m_durationSeconds / ui->videoSlider->maximum();
+        m_mpvPlayer->setCurrentPlayPosition(targetSeconds);
+        updateTimeLabel(targetSeconds);
+    });
+
+    connect(ui->videoSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_isSliderPressed || m_durationSeconds <= 0) {
+            return;
+        }
+
+        const int targetSeconds = value * m_durationSeconds / ui->videoSlider->maximum();
+        updateTimeLabel(targetSeconds);
+    });
+
+    connect(m_mpvPlayer, &MpvPlayer::durationChanged, this, [this](int durationSeconds) {
+        m_durationSeconds = durationSeconds;
+        updateTimeLabel(0);
+    });
+
+    connect(m_mpvPlayer, &MpvPlayer::playPositionChanged, this, [this](int currentSeconds) {
+        updateTimeLabel(currentSeconds);
+        updateSliderPosition(currentSeconds);
+    });
+
+    connect(m_mpvPlayer, &MpvPlayer::endOfPlaylist, this, [this]() {
+        m_isPlaying = false;
+        updatePlayButton();
+        updateSliderPosition(m_durationSeconds);
+        updateTimeLabel(m_durationSeconds);
+    });
+
+    m_mpvPlayer->startPlay("D:/video-on-demand-client/test.mp4");
+    m_mpvPlayer->pause();
+    m_mpvPlayer->setVolume(m_volume);
+    m_mpvPlayer->setPlaySpeed(m_playSpeed);
 }
 
 void PlayerPage::initSpeedMenu()
@@ -148,6 +206,7 @@ void PlayerPage::initSpeedMenu()
         auto *action = m_speedMenu->addAction(QString::number(speed, 'f', speed == 1.25 ? 2 : 1) + "x");
         connect(action, &QAction::triggered, this, [this, speed]() {
             m_playSpeed = speed;
+            m_mpvPlayer->setPlaySpeed(m_playSpeed);
             updateSpeedButton();
             LOG() << "播放页切换倍速:" << m_title << m_playSpeed;
         });
@@ -210,6 +269,9 @@ void PlayerPage::initVolumePanel()
 
     connect(m_volumeSlider, &QSlider::valueChanged, this, [this](int value) {
         m_volume = value;
+        if (m_mpvPlayer) {
+            m_mpvPlayer->setVolume(m_volume);
+        }
         updateVolumeLabel();
         LOG() << "播放页调整音量:" << m_title << m_volume;
     });
@@ -296,4 +358,41 @@ void PlayerPage::showVolumePanel()
     m_volumePanel->move(panelPos);
     m_volumePanel->show();
     m_volumePanel->raise();
+}
+
+void PlayerPage::updateTimeLabel(int currentSeconds)
+{
+    ui->timeLabel->setText(formatSeconds(currentSeconds) + " / " + formatSeconds(m_durationSeconds));
+}
+
+void PlayerPage::updateSliderPosition(int currentSeconds)
+{
+    if (m_isSliderPressed || m_durationSeconds <= 0) {
+        return;
+    }
+
+    const QSignalBlocker blocker(ui->videoSlider);
+    ui->videoSlider->setValue(currentSeconds * ui->videoSlider->maximum() / m_durationSeconds);
+}
+
+QString PlayerPage::formatSeconds(int seconds)
+{
+    if (seconds < 0) {
+        seconds = 0;
+    }
+
+    const int hours = seconds / 3600;
+    const int minutes = seconds % 3600 / 60;
+    const int remainingSeconds = seconds % 60;
+
+    if (hours > 0) {
+        return QString("%1:%2:%3")
+            .arg(hours, 2, 10, QLatin1Char('0'))
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(remainingSeconds, 2, 10, QLatin1Char('0'));
+    }
+
+    return QString("%1:%2")
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(remainingSeconds, 2, 10, QLatin1Char('0'));
 }

@@ -30,6 +30,8 @@ qt_add_executable(player
     login.h login.cpp login.ui
     uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui
     adminwidget.h adminwidget.cpp adminwidget.ui
+    mpv/client.h
+    mpv/mpvplayer.h mpv/mpvplayer.cpp
     util.h
 
 )
@@ -46,6 +48,14 @@ target_link_libraries(player
         Qt::Core
         Qt::Widgets
         Qt::Svg
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv.dll.a
+)
+
+add_custom_command(TARGET player POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv-2.dll
+        $<TARGET_FILE_DIR:player>/libmpv-2.dll
+    COMMENT "Copying libmpv runtime DLL"
 )
 
 if (WIN32)

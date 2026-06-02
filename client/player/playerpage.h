@@ -7,6 +7,8 @@
 #include <QString>
 #include <QWidget>
 
+#include "mpv/mpvplayer.h"
+
 class QLabel;
 class QMenu;
 class QSlider;
@@ -48,20 +50,26 @@ private:
     void updateSpeedButton();
     void updateVolumeLabel();
     void showVolumePanel();
+    void updateTimeLabel(int currentSeconds);
+    void updateSliderPosition(int currentSeconds);
+    static QString formatSeconds(int seconds);
 
 private:
     Ui::PlayerPage *ui;
     bool m_isDragging = false;
     bool m_isPlaying = false;
     bool m_isLiked = false;
+    bool m_isSliderPressed = false;
     double m_playSpeed = 1.0;
     int m_volume = 60;
+    int m_durationSeconds = 0;
     QPoint m_dragOffset;
     QString m_title;
     QMenu *m_speedMenu = nullptr;
     QWidget *m_volumePanel = nullptr;
     QSlider *m_volumeSlider = nullptr;
     QLabel *m_volumeValueLabel = nullptr;
+    MpvPlayer *m_mpvPlayer = nullptr;
 };
 
 #endif // PLAYERPAGE_H

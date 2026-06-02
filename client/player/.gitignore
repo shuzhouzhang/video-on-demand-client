@@ -73,6 +73,8 @@ CMakeLists.txt.user*
 # --------
 *.dll
 *.exe
+!mpv/dll/libmpv-2.dll
+!mpv/dll/libmpv.dll.a
 
 # Directories with generated files
 .moc/
