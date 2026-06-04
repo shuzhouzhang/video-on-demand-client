@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QShortcut>
 #include <QSlider>
 #include <QSize>
 #include <QSignalBlocker>
@@ -101,6 +102,10 @@ void PlayerPage::initUI(const QString &title,
     updateLikeButton();
     updateSpeedButton();
     updateVolumeLabel();
+
+    auto *playShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
+    playShortcut->setContext(Qt::WindowShortcut);
+    connect(playShortcut, &QShortcut::activated, ui->playBtn, &QPushButton::click);
 
     connect(ui->minBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(ui->quitBtn, &QPushButton::clicked, this, &QWidget::close);
