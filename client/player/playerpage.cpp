@@ -1,19 +1,28 @@
 // playerpage.cpp 实现视频播放页的静态 UI 和基础交互。
-// 当前阶段不接真实播放器，只验证播放页窗口、数据展示和按钮事件链路。
+// 播放页已接入 libmpv，负责播放控制、时间同步和视频信息展示。
 #include "playerpage.h"
+#include "bulletscreenitem.h"
+#include "datacenter.h"
 #include "ui_playerpage.h"
 #include "util.h"
 
 #include <QAction>
 #include <QFrame>
+#include <QHBoxLayout>
+#include <QHideEvent>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <QShortcut>
+#include <QShowEvent>
 #include <QSlider>
 #include <QSize>
+#include <QSizePolicy>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <QVBoxLayout>
 
 PlayerPage::PlayerPage(const QString &title,
@@ -31,6 +40,9 @@ PlayerPage::PlayerPage(const QString &title,
 
 PlayerPage::~PlayerPage()
 {
+    if (m_barrageLayer) {
+        m_barrageLayer->hide();
+    }
     delete m_mpvPlayer;
     m_mpvPlayer = nullptr;
     delete ui;
@@ -52,6 +64,7 @@ void PlayerPage::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_isDragging) {
         move(event->globalPosition().toPoint() - m_dragOffset);
+        updateBarrageLayerGeometry();
         event->accept();
         return;
     }
@@ -68,6 +81,24 @@ void PlayerPage::mouseReleaseEvent(QMouseEvent *event)
     }
 
     QWidget::mouseReleaseEvent(event);
+}
+
+void PlayerPage::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    updateBarrageLayerGeometry();
+    if (m_isBarrageEnabled && m_barrageLayer) {
+        m_barrageLayer->show();
+        m_barrageLayer->raise();
+    }
+}
+
+void PlayerPage::hideEvent(QHideEvent *event)
+{
+    if (m_barrageLayer) {
+        m_barrageLayer->hide();
+    }
+    QWidget::hideEvent(event);
 }
 
 void PlayerPage::initUI(const QString &title,
@@ -98,10 +129,13 @@ void PlayerPage::initUI(const QString &title,
 
     initSpeedMenu();
     initVolumePanel();
+    initBarrageLayer();
+    initBarrageControls();
     updatePlayButton();
     updateLikeButton();
     updateSpeedButton();
     updateVolumeLabel();
+    updateBarrageButton();
 
     auto *playShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     playShortcut->setContext(Qt::WindowShortcut);
@@ -146,9 +180,11 @@ void PlayerPage::initUI(const QString &title,
             return;
         }
 
-        const int targetSeconds = ui->videoSlider->value() * m_durationSeconds / ui->videoSlider->maximum();
+        const int targetSeconds = sliderValueToSeconds();
+        m_currentPlaySeconds = targetSeconds;
         m_mpvPlayer->setCurrentPlayPosition(targetSeconds);
         updateTimeLabel(targetSeconds);
+        updateSliderPosition(targetSeconds);
     });
 
     connect(ui->videoSlider, &QSlider::valueChanged, this, [this](int value) {
@@ -156,28 +192,36 @@ void PlayerPage::initUI(const QString &title,
             return;
         }
 
-        const int targetSeconds = value * m_durationSeconds / ui->videoSlider->maximum();
-        updateTimeLabel(targetSeconds);
+        updateTimeLabel(value * m_durationSeconds / ui->videoSlider->maximum());
     });
 
     connect(m_mpvPlayer, &MpvPlayer::durationChanged, this, [this](int durationSeconds) {
+        if (durationSeconds <= 0) {
+            return;
+        }
+
         m_durationSeconds = durationSeconds;
         updateTimeLabel(0);
     });
 
     connect(m_mpvPlayer, &MpvPlayer::playPositionChanged, this, [this](int currentSeconds) {
+        m_currentPlaySeconds = currentSeconds;
         updateTimeLabel(currentSeconds);
         updateSliderPosition(currentSeconds);
+        showBarragesAt(currentSeconds);
     });
 
     connect(m_mpvPlayer, &MpvPlayer::endOfPlaylist, this, [this]() {
+        m_isSliderPressed = false;
         m_isPlaying = false;
+        m_currentPlaySeconds = m_durationSeconds;
         updatePlayButton();
         updateSliderPosition(m_durationSeconds);
         updateTimeLabel(m_durationSeconds);
     });
 
-    m_mpvPlayer->startPlay("D:/video-on-demand-client/test.mp4");
+    m_videoKey = "D:/video-on-demand-client/test.mp4";
+    m_mpvPlayer->startPlay(m_videoKey);
     m_mpvPlayer->pause();
     m_mpvPlayer->setVolume(m_volume);
     m_mpvPlayer->setPlaySpeed(m_playSpeed);
@@ -285,6 +329,115 @@ void PlayerPage::initVolumePanel()
     m_volumePanel->hide();
 }
 
+void PlayerPage::initBarrageLayer()
+{
+    m_barrageLayer = new QWidget(this, Qt::FramelessWindowHint | Qt::Tool);
+    m_barrageLayer->setAttribute(Qt::WA_TranslucentBackground);
+    m_barrageLayer->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_barrageLayer->setObjectName("barrageLayer");
+    m_barrageLayer->setStyleSheet(R"(
+        QWidget#barrageLayer {
+            background: transparent;
+        }
+        QFrame#barrageTrack {
+            border: none;
+            background: transparent;
+        }
+    )");
+
+    auto *layout = new QVBoxLayout(m_barrageLayer);
+    layout->setContentsMargins(0, 16, 0, 0);
+    layout->setSpacing(6);
+
+    m_barrageTrackTop = new QFrame(m_barrageLayer);
+    m_barrageTrackMiddle = new QFrame(m_barrageLayer);
+    m_barrageTrackBottom = new QFrame(m_barrageLayer);
+    for (QFrame *track : {m_barrageTrackTop, m_barrageTrackMiddle, m_barrageTrackBottom}) {
+        track->setObjectName("barrageTrack");
+        track->setMinimumHeight(34);
+        track->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        layout->addWidget(track);
+    }
+    layout->addStretch(1);
+
+    updateBarrageLayerGeometry();
+    m_barrageLayer->hide();
+}
+
+void PlayerPage::initBarrageControls()
+{
+    m_barrageToggleBtn = new QPushButton(ui->playControl);
+    m_barrageToggleBtn->setFixedSize(28, 28);
+    m_barrageToggleBtn->setCursor(Qt::PointingHandCursor);
+    m_barrageToggleBtn->setToolTip(QString::fromUtf8("弹幕开关"));
+    m_barrageToggleBtn->setStyleSheet(R"(
+        QPushButton {
+            border: none;
+            background: transparent;
+        }
+        QPushButton:hover {
+            background: rgba(255, 255, 255, 0.10);
+        }
+    )");
+
+    m_barrageEdit = new QLineEdit(ui->playControl);
+    m_barrageEdit->setMaxLength(30);
+    m_barrageEdit->setPlaceholderText(QString::fromUtf8("发个友善的弹幕..."));
+    m_barrageEdit->setFixedHeight(28);
+    m_barrageEdit->setMinimumWidth(180);
+    m_barrageEdit->setMaximumWidth(360);
+    m_barrageEdit->setStyleSheet(R"(
+        QLineEdit {
+            border: 1px solid #374151;
+            border-radius: 4px;
+            padding: 0 10px;
+            background: #111827;
+            color: #e5e7eb;
+            selection-background-color: #3eceff;
+            font-size: 13px;
+        }
+        QLineEdit:focus {
+            border-color: #3eceff;
+        }
+    )");
+
+    m_barrageSendBtn = new QPushButton(QString::fromUtf8("发送"), ui->playControl);
+    m_barrageSendBtn->setFixedSize(56, 28);
+    m_barrageSendBtn->setCursor(Qt::PointingHandCursor);
+    m_barrageSendBtn->setStyleSheet(R"(
+        QPushButton {
+            border: none;
+            border-radius: 4px;
+            background: #3eceff;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        QPushButton:hover {
+            background: #23b6e6;
+        }
+    )");
+
+    ui->buttonLayout->insertWidget(2, m_barrageToggleBtn);
+    ui->buttonLayout->insertWidget(3, m_barrageEdit, 1);
+    ui->buttonLayout->insertWidget(4, m_barrageSendBtn);
+
+    connect(m_barrageToggleBtn, &QPushButton::clicked, this, [this]() {
+        m_isBarrageEnabled = !m_isBarrageEnabled;
+        if (m_barrageLayer) {
+            m_barrageLayer->setVisible(m_isBarrageEnabled && isVisible());
+            if (m_isBarrageEnabled) {
+                updateBarrageLayerGeometry();
+                m_barrageLayer->raise();
+            }
+        }
+        updateBarrageButton();
+    });
+
+    connect(m_barrageSendBtn, &QPushButton::clicked, this, &PlayerPage::sendBarrage);
+    connect(m_barrageEdit, &QLineEdit::returnPressed, this, &PlayerPage::sendBarrage);
+}
+
 void PlayerPage::updatePlayButton()
 {
     ui->playBtn->setText(QString());
@@ -351,6 +504,18 @@ void PlayerPage::updateVolumeLabel()
     }
 }
 
+void PlayerPage::updateBarrageButton()
+{
+    if (!m_barrageToggleBtn) {
+        return;
+    }
+
+    m_barrageToggleBtn->setIcon(QIcon(m_isBarrageEnabled
+                                          ? ":/images/PlayPage/danmu.png"
+                                          : ":/images/PlayPage/danmuguan.png"));
+    m_barrageToggleBtn->setIconSize(QSize(22, 22));
+}
+
 void PlayerPage::showVolumePanel()
 {
     if (m_volumePanel->isVisible()) {
@@ -365,8 +530,22 @@ void PlayerPage::showVolumePanel()
     m_volumePanel->raise();
 }
 
+void PlayerPage::updateBarrageLayerGeometry()
+{
+    if (!m_barrageLayer || !ui || !ui->videoScreen) {
+        return;
+    }
+
+    m_barrageLayer->setFixedSize(ui->videoScreen->size());
+    m_barrageLayer->move(ui->videoScreen->mapToGlobal(QPoint(0, 0)));
+}
+
 void PlayerPage::updateTimeLabel(int currentSeconds)
 {
+    if (m_durationSeconds > 0 && currentSeconds > m_durationSeconds) {
+        currentSeconds = m_durationSeconds;
+    }
+
     ui->timeLabel->setText(formatSeconds(currentSeconds) + " / " + formatSeconds(m_durationSeconds));
 }
 
@@ -377,7 +556,95 @@ void PlayerPage::updateSliderPosition(int currentSeconds)
     }
 
     const QSignalBlocker blocker(ui->videoSlider);
+    currentSeconds = qBound(0, currentSeconds, m_durationSeconds);
     ui->videoSlider->setValue(currentSeconds * ui->videoSlider->maximum() / m_durationSeconds);
+}
+
+int PlayerPage::sliderValueToSeconds() const
+{
+    if (m_durationSeconds <= 0 || ui->videoSlider->maximum() <= 0) {
+        return 0;
+    }
+
+    return qBound(0, ui->videoSlider->value() * m_durationSeconds / ui->videoSlider->maximum(), m_durationSeconds);
+}
+
+void PlayerPage::sendBarrage()
+{
+    if (!m_barrageEdit) {
+        return;
+    }
+
+    const QString text = m_barrageEdit->text().trimmed();
+    if (text.isEmpty()) {
+        return;
+    }
+
+    const int upperBound = m_durationSeconds > 0 ? m_durationSeconds : m_currentPlaySeconds;
+    const int second = qBound(0, m_currentPlaySeconds, upperBound);
+    DataCenter::instance().addBarrage(m_videoKey, second, text);
+
+    if (m_isBarrageEnabled) {
+        showBarrageText(text, 0);
+        m_triggeredBarrageSeconds.insert(second);
+    }
+
+    m_barrageEdit->clear();
+}
+
+void PlayerPage::showBarragesAt(int seconds)
+{
+    if (!m_isBarrageEnabled || seconds < 0 || m_triggeredBarrageSeconds.contains(seconds)) {
+        return;
+    }
+
+    m_triggeredBarrageSeconds.insert(seconds);
+    const QStringList barrages = DataCenter::instance().barragesAt(m_videoKey, seconds);
+    for (const QString &text : barrages) {
+        showBarrageText(text);
+    }
+}
+
+void PlayerPage::showBarrageText(const QString &text, int trackIndex)
+{
+    if (!m_barrageLayer || text.trimmed().isEmpty()) {
+        return;
+    }
+
+    updateBarrageLayerGeometry();
+    if (!m_barrageLayer->isVisible()) {
+        m_barrageLayer->show();
+    }
+    m_barrageLayer->raise();
+
+    if (trackIndex < 0) {
+        trackIndex = m_nextBarrageTrack % 3;
+        ++m_nextBarrageTrack;
+    }
+
+    QFrame *track = barrageTrackForIndex(trackIndex);
+    if (!track || track->width() <= 0) {
+        return;
+    }
+
+    auto *item = new BulletScreenItem(track);
+    item->setBulletScreenText(text.left(30));
+    const int startX = track->width();
+    const int durationMs = qMax(6500, (startX + item->width()) * 9);
+    item->setBulletScreenAnimation(startX, durationMs);
+    item->startAnimation();
+}
+
+QFrame *PlayerPage::barrageTrackForIndex(int index) const
+{
+    switch (index % 3) {
+    case 0:
+        return m_barrageTrackTop;
+    case 1:
+        return m_barrageTrackMiddle;
+    default:
+        return m_barrageTrackBottom;
+    }
 }
 
 QString PlayerPage::formatSeconds(int seconds)

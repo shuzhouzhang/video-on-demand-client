@@ -37,7 +37,7 @@ private:
 
 private:
     mpv_handle *m_mpv = nullptr;
-    int m_currentSeconds = 0;
+    int m_currentSeconds = -1;
 };
 
 #endif // MPVPLAYER_H

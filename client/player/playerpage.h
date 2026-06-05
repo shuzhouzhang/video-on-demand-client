@@ -4,13 +4,19 @@
 #define PLAYERPAGE_H
 
 #include <QPoint>
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
 #include "mpv/mpvplayer.h"
 
 class QLabel;
+class QFrame;
+class QHideEvent;
+class QLineEdit;
 class QMenu;
+class QPushButton;
+class QShowEvent;
 class QSlider;
 
 namespace Ui {
@@ -35,6 +41,8 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
     void initUI(const QString &title,
@@ -45,13 +53,22 @@ private:
                 const QString &likeCount);
     void initSpeedMenu();
     void initVolumePanel();
+    void initBarrageLayer();
+    void initBarrageControls();
     void updatePlayButton();
     void updateLikeButton();
     void updateSpeedButton();
     void updateVolumeLabel();
+    void updateBarrageButton();
     void showVolumePanel();
+    void updateBarrageLayerGeometry();
     void updateTimeLabel(int currentSeconds);
     void updateSliderPosition(int currentSeconds);
+    int sliderValueToSeconds() const;
+    void sendBarrage();
+    void showBarragesAt(int seconds);
+    void showBarrageText(const QString &text, int trackIndex = -1);
+    QFrame *barrageTrackForIndex(int index) const;
     static QString formatSeconds(int seconds);
 
 private:
@@ -63,13 +80,25 @@ private:
     double m_playSpeed = 1.0;
     int m_volume = 60;
     int m_durationSeconds = 0;
+    int m_currentPlaySeconds = 0;
+    int m_nextBarrageTrack = 0;
     QPoint m_dragOffset;
     QString m_title;
+    QString m_videoKey;
     QMenu *m_speedMenu = nullptr;
     QWidget *m_volumePanel = nullptr;
     QSlider *m_volumeSlider = nullptr;
     QLabel *m_volumeValueLabel = nullptr;
     MpvPlayer *m_mpvPlayer = nullptr;
+    bool m_isBarrageEnabled = true;
+    QSet<int> m_triggeredBarrageSeconds;
+    QWidget *m_barrageLayer = nullptr;
+    QFrame *m_barrageTrackTop = nullptr;
+    QFrame *m_barrageTrackMiddle = nullptr;
+    QFrame *m_barrageTrackBottom = nullptr;
+    QPushButton *m_barrageToggleBtn = nullptr;
+    QLineEdit *m_barrageEdit = nullptr;
+    QPushButton *m_barrageSendBtn = nullptr;
 };
 
 #endif // PLAYERPAGE_H

@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QWidget>
 
+#include <algorithm>
 #include <clocale>
 #include <cstring>
 
@@ -64,6 +65,7 @@ void MpvPlayer::startPlay(const QString &videoPath)
         return;
     }
 
+    m_currentSeconds = -1;
     const QByteArray fileName = videoPath.toUtf8();
     const char *args[] = {"loadfile", fileName.constData(), nullptr};
     mpv_command_async(m_mpv, 0, args);
@@ -114,7 +116,7 @@ void MpvPlayer::setCurrentPlayPosition(int seconds)
         return;
     }
 
-    double targetSeconds = seconds;
+    double targetSeconds = std::max(0, seconds);
     mpv_set_property_async(m_mpv, 0, "time-pos", MPV_FORMAT_DOUBLE, &targetSeconds);
 }
 
@@ -140,13 +142,19 @@ void MpvPlayer::handleMpvEvent(mpv_event *event)
         }
 
         if (std::strcmp(property->name, "time-pos") == 0) {
-            const auto seconds = static_cast<int>(*static_cast<double *>(property->data));
+            double segmentStartSeconds = 0;
+            double segmentCurrentSeconds = *static_cast<double *>(property->data);
+            if (mpv_get_property(m_mpv, "demuxer-start-time", MPV_FORMAT_DOUBLE, &segmentStartSeconds) < 0) {
+                segmentStartSeconds = 0;
+            }
+
+            const int seconds = std::max(0, static_cast<int>(segmentStartSeconds + segmentCurrentSeconds));
             if (seconds != m_currentSeconds) {
                 m_currentSeconds = seconds;
                 emit playPositionChanged(m_currentSeconds);
             }
         } else if (std::strcmp(property->name, "duration") == 0) {
-            emit durationChanged(static_cast<int>(*static_cast<double *>(property->data)));
+            emit durationChanged(std::max(0, static_cast<int>(*static_cast<double *>(property->data))));
         }
         break;
     }
