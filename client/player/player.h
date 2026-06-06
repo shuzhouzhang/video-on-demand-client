@@ -3,14 +3,17 @@
 #ifndef PLAYER_H
 #define PLAYER_H
 
+#include <QList>
 #include <QPoint>
 #include <QString>
 #include <QWidget>
 
 class Login;
 class QEvent;
+class QLayout;
 class QMouseEvent;
 class QObject;
+class QPushButton;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -37,6 +40,12 @@ protected:
 private:
     // 初始化主界面。
     void initUI();
+    void initHomeFilters();
+    void refreshHomeCategoryButtons();
+    void refreshHomeTagButtons();
+    void renderHomeVideos();
+    void selectHomeCategory(const QString &category);
+    void clearLayout(QLayout *layout);
     void showLoginWindow();
     void updateLoginState(const QString &userName, const QString &account);
 
@@ -56,6 +65,10 @@ private:
     QString m_loginUserName;
     QString m_loginAccount;
     Login *m_loginWindow = nullptr;
+    QString m_selectedCategory;
+    QString m_selectedTag;
+    QList<QPushButton *> m_categoryButtons;
+    QList<QPushButton *> m_tagButtons;
 };
 
 #endif // PLAYER_H

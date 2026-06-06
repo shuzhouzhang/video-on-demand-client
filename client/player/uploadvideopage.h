@@ -3,9 +3,7 @@
 #ifndef UPLOADVIDEOPAGE_H
 #define UPLOADVIDEOPAGE_H
 
-#include <QMap>
 #include <QString>
-#include <QStringList>
 #include <QWidget>
 
 namespace Ui {
@@ -13,6 +11,7 @@ class UploadVideoPage;
 }
 
 class QPushButton;
+class QComboBox;
 
 class UploadVideoPage : public QWidget
 {
@@ -30,8 +29,8 @@ signals:
 
 private:
     void initUI();
-    void initCategoryData();
-    void updateTags(const QString &category);
+    void updateTags();
+    void addSelectedTag(const QString &tag);
     void updateTitleCount(const QString &text);
     void updateDescCount();
     void chooseVideo();
@@ -43,7 +42,7 @@ private:
     Ui::UploadVideoPage *ui;
     QString m_videoPath;
     QString m_coverPath;
-    QMap<QString, QStringList> m_categoryTags;
+    QComboBox *m_tagCombo = nullptr;
 };
 
 #endif // UPLOADVIDEOPAGE_H

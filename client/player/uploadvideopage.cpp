@@ -1,15 +1,18 @@
 // uploadvideopage.cpp 实现上传视频页面的静态表单流程。
 // 当前阶段只做本地文件选择、表单校验和页面切换，不做真实网络上传。
 #include "uploadvideopage.h"
+#include "datacenter.h"
 #include "ui_uploadvideopage.h"
 #include "util.h"
 
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLayoutItem>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
+#include <QStringList>
 #include <QTextCursor>
 
 namespace {
@@ -63,20 +66,21 @@ void UploadVideoPage::resetPage()
     ui->coverImageLabel->setPixmap(QPixmap());
     ui->coverImageLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/videoCoverBg.png);");
     ui->kindCombo->setCurrentIndex(-1);
-    updateTags(QString());
+    updateTags();
 }
 
 void UploadVideoPage::initUI()
 {
     ui->setupUi(this);
-    initCategoryData();
 
     ui->downIconLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/wancheng.png);");
     ui->fileIconLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/wenjian.png);");
     ui->coverIconLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/fengmian.png);");
     ui->coverImageLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/videoCoverBg.png);");
+    ui->categoryTitleLabel->setText("分类");
+    ui->fieldTipLabel->setText("标签可自行选择，最多 5 个");
 
-    ui->kindCombo->addItems(m_categoryTags.keys());
+    ui->kindCombo->addItems(DataCenter::instance().categories());
     ui->kindCombo->setCurrentIndex(-1);
 
     connect(ui->videoTitleEdit, &QLineEdit::textChanged, this, &UploadVideoPage::updateTitleCount);
@@ -135,7 +139,8 @@ void UploadVideoPage::initUI()
         }
         QLineEdit#videoTitleEdit,
         QPlainTextEdit#descEdit,
-        QComboBox#kindCombo {
+        QComboBox#kindCombo,
+        QComboBox#tagCombo {
             border: 1px solid #dbe7f0;
             border-radius: 6px;
             color: #111827;
@@ -150,14 +155,29 @@ void UploadVideoPage::initUI()
         QPlainTextEdit#descEdit {
             padding: 10px;
         }
-        QComboBox#kindCombo {
+        QComboBox#kindCombo,
+        QComboBox#tagCombo {
             min-height: 38px;
             padding-left: 12px;
         }
         QLineEdit#videoTitleEdit:focus,
         QPlainTextEdit#descEdit:focus,
-        QComboBox#kindCombo:focus {
+        QComboBox#kindCombo:focus,
+        QComboBox#tagCombo:focus {
             border-color: #3eceff;
+        }
+        QPushButton#addTagButton {
+            min-width: 62px;
+            min-height: 34px;
+            border: none;
+            border-radius: 17px;
+            color: #ffffff;
+            background: #3eceff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        QPushButton#addTagButton:hover {
+            background: #27bee8;
         }
         QPushButton#tagButton {
             min-width: 86px;
@@ -204,20 +224,9 @@ void UploadVideoPage::initUI()
     )");
 }
 
-void UploadVideoPage::initCategoryData()
+void UploadVideoPage::updateTags()
 {
-    m_categoryTags.insert("历史", {"中国史", "世界史", "人物传记", "历史故事", "文化遗产"});
-    m_categoryTags.insert("美食", {"美食测评", "美食制作", "地方小吃", "家常菜", "探店"});
-    m_categoryTags.insert("游戏", {"游戏攻略", "实况解说", "新手教程", "赛事集锦", "主机游戏"});
-    m_categoryTags.insert("科技", {"数码评测", "前沿科技", "编程开发", "人工智能", "软件工具"});
-    m_categoryTags.insert("运动", {"健身训练", "篮球", "足球", "跑步", "户外运动"});
-    m_categoryTags.insert("动物", {"萌宠日常", "动物世界", "养宠知识", "救助记录", "自然观察"});
-    m_categoryTags.insert("旅游", {"北京旅游", "城市漫步", "旅行攻略", "风景记录", "酒店体验"});
-    m_categoryTags.insert("电影", {"电影解说", "影评", "预告解析", "幕后故事", "经典片段"});
-}
-
-void UploadVideoPage::updateTags(const QString &category)
-{
+    m_tagCombo = nullptr;
     while (QLayoutItem *item = ui->tagLayout->takeAt(0)) {
         if (QWidget *widget = item->widget()) {
             widget->deleteLater();
@@ -225,23 +234,68 @@ void UploadVideoPage::updateTags(const QString &category)
         delete item;
     }
 
-    const QStringList tags = m_categoryTags.value(category);
-    for (const QString &tag : tags) {
-        auto *button = new QPushButton(tag, ui->tagWidget);
-        button->setObjectName("tagButton");
-        button->setCheckable(true);
-        button->setCursor(Qt::PointingHandCursor);
-        ui->tagLayout->addWidget(button);
+    const QStringList tags = DataCenter::instance().tagsForCategory(ui->kindCombo->currentText());
 
-        connect(button, &QPushButton::toggled, this, [this, button](bool checked) {
-            if (checked && selectedTagCount() > kMaxTagCount) {
-                button->setChecked(false);
-                QMessageBox::information(this, "上传视频", "最多只能选择 5 个标签");
-            }
-        });
+    m_tagCombo = new QComboBox(ui->tagWidget);
+    m_tagCombo->setObjectName("tagCombo");
+    m_tagCombo->addItems(tags);
+    if (tags.isEmpty()) {
+        m_tagCombo->addItem("请先选择分类");
     }
+    m_tagCombo->setMinimumWidth(180);
+    m_tagCombo->setMaximumWidth(220);
+    m_tagCombo->setEnabled(!tags.isEmpty());
+    ui->tagLayout->addWidget(m_tagCombo);
+
+    auto *addTagButton = new QPushButton("添加", ui->tagWidget);
+    addTagButton->setObjectName("addTagButton");
+    addTagButton->setCursor(Qt::PointingHandCursor);
+    addTagButton->setEnabled(!tags.isEmpty());
+    ui->tagLayout->addWidget(addTagButton);
+
+    connect(addTagButton, &QPushButton::clicked, this, [this]() {
+        if (!m_tagCombo) {
+            return;
+        }
+
+        addSelectedTag(m_tagCombo->currentText());
+    });
 
     ui->tagLayout->addStretch();
+}
+
+void UploadVideoPage::addSelectedTag(const QString &tag)
+{
+    const QString trimmedTag = tag.trimmed();
+    if (trimmedTag.isEmpty()) {
+        return;
+    }
+
+    if (selectedTagCount() >= kMaxTagCount) {
+        QMessageBox::information(this, "上传视频", "最多只能选择 5 个标签");
+        return;
+    }
+
+    const QList<QPushButton *> buttons = ui->tagWidget->findChildren<QPushButton *>("tagButton");
+    for (const auto *button : buttons) {
+        if (button->text() == trimmedTag) {
+            return;
+        }
+    }
+
+    auto *button = new QPushButton(trimmedTag, ui->tagWidget);
+    button->setObjectName("tagButton");
+    button->setCheckable(true);
+    button->setChecked(true);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setToolTip("再次点击取消选择");
+
+    const int stretchIndex = qMax(0, ui->tagLayout->count() - 1);
+    ui->tagLayout->insertWidget(stretchIndex, button);
+
+    connect(button, &QPushButton::clicked, button, [button]() {
+        button->deleteLater();
+    });
 }
 
 void UploadVideoPage::updateTitleCount(const QString &text)

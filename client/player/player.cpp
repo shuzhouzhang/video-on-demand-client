@@ -1,6 +1,7 @@
 // player.cpp 实现主窗口逻辑。
 // 这里负责初始化 UI、连接按钮事件、切换右侧页面，以及处理无边框窗口拖拽。
 #include "player.h"
+#include "datacenter.h"
 #include "login.h"
 #include "ui_player.h"
 #include "pageswitchbutton.h"
@@ -9,6 +10,7 @@
 #include "util.h"
 #include "videobox.h"
 
+#include <QAction>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -16,9 +18,11 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QLayoutItem>
 #include <QList>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -29,6 +33,8 @@
 #include <QVBoxLayout>
 
 namespace {
+constexpr int kVisibleHomeCategoryCount = 5;
+
 QIcon makeCircleAvatarIcon(const QPixmap &source, int size)
 {
     if (source.isNull()) {
@@ -147,6 +153,190 @@ void player::updateLoginState(const QString &userName, const QString &account)
     LOG() << "我的页面已切换到登录状态:" << account;
 }
 
+void player::clearLayout(QLayout *layout)
+{
+    if (!layout) {
+        return;
+    }
+
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->hide();
+            widget->deleteLater();
+        }
+        delete item;
+    }
+}
+
+void player::initHomeFilters()
+{
+    m_selectedCategory.clear();
+    m_selectedTag.clear();
+    refreshHomeCategoryButtons();
+    refreshHomeTagButtons();
+}
+
+void player::refreshHomeCategoryButtons()
+{
+    clearLayout(ui->classifyHLayout);
+    m_categoryButtons.clear();
+
+    const QStringList categories = DataCenter::instance().categories();
+
+    auto addCategoryButton = [this](const QString &category, bool selected) {
+        auto *button = new QPushButton(category, ui->classifys);
+        button->setObjectName("homeTextOption");
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFlat(true);
+        button->setProperty("selected", selected);
+        button->setMinimumHeight(28);
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+        m_categoryButtons.append(button);
+        ui->classifyHLayout->addWidget(button);
+
+        connect(button, &QPushButton::clicked, this, [this, category]() {
+            selectHomeCategory(category == "分类" ? QString() : category);
+        });
+
+        return button;
+    };
+
+    addCategoryButton("分类", m_selectedCategory.isEmpty());
+    const int visibleCount = qMin(kVisibleHomeCategoryCount, categories.size());
+    for (int i = 0; i < visibleCount; ++i) {
+        const QString category = categories.at(i);
+        addCategoryButton(category, category == m_selectedCategory);
+    }
+
+    if (categories.size() > visibleCount) {
+        auto *moreButton = new QPushButton("更多", ui->classifys);
+        moreButton->setObjectName("homeTextOption");
+        moreButton->setCursor(Qt::PointingHandCursor);
+        moreButton->setFlat(true);
+        moreButton->setMinimumHeight(28);
+        moreButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+        auto *moreMenu = new QMenu(moreButton);
+        bool moreSelected = false;
+        for (int i = visibleCount; i < categories.size(); ++i) {
+            const QString category = categories.at(i);
+            auto *action = moreMenu->addAction(category);
+            connect(action, &QAction::triggered, this, [this, category]() {
+                selectHomeCategory(category);
+            });
+            moreSelected = moreSelected || category == m_selectedCategory;
+        }
+
+        moreButton->setProperty("selected", moreSelected);
+        moreButton->setMenu(moreMenu);
+        moreButton->style()->unpolish(moreButton);
+        moreButton->style()->polish(moreButton);
+        m_categoryButtons.append(moreButton);
+        ui->classifyHLayout->addWidget(moreButton);
+    }
+
+    ui->classifyHLayout->addStretch();
+    ui->classifys->updateGeometry();
+    ui->classifys->update();
+}
+
+void player::selectHomeCategory(const QString &category)
+{
+    m_selectedCategory = category;
+    m_selectedTag.clear();
+    refreshHomeCategoryButtons();
+    refreshHomeTagButtons();
+    renderHomeVideos();
+    LOG() << "切换分类:" << (m_selectedCategory.isEmpty() ? "全部" : m_selectedCategory);
+}
+
+void player::refreshHomeTagButtons()
+{
+    clearLayout(ui->labelHLayout);
+    m_tagButtons.clear();
+
+    if (m_selectedCategory.isEmpty()) {
+        ui->labels->hide();
+        ui->labels->updateGeometry();
+        return;
+    }
+
+    ui->labels->show();
+
+    QStringList tags;
+    tags.append("标签");
+    tags.append(DataCenter::instance().tagsForCategory(m_selectedCategory));
+
+    for (const QString &tag : tags) {
+        auto *button = new QPushButton(tag, ui->labels);
+        button->setObjectName("homeTextOption");
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFlat(true);
+        button->setProperty("selected", tag == "标签" ? m_selectedTag.isEmpty() : tag == m_selectedTag);
+        button->setMinimumHeight(28);
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        button->style()->unpolish(button);
+        button->style()->polish(button);
+        m_tagButtons.append(button);
+        ui->labelHLayout->addWidget(button);
+
+        connect(button, &QPushButton::clicked, this, [this, tag]() {
+            m_selectedTag = tag == "标签" ? QString() : tag;
+            refreshHomeTagButtons();
+            renderHomeVideos();
+            LOG() << "切换标签:" << (m_selectedTag.isEmpty() ? "全部" : m_selectedTag);
+        });
+    }
+
+    ui->labelHLayout->addStretch();
+    ui->labels->updateGeometry();
+    ui->labels->update();
+}
+
+void player::renderHomeVideos()
+{
+    clearLayout(ui->videoScrollLayout);
+    ui->videoScrollLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+
+    int visibleIndex = 0;
+    const QList<VideoInfo> videos = DataCenter::instance().homeVideos();
+    for (const VideoInfo &video : videos) {
+        if (!m_selectedCategory.isEmpty() && video.category != m_selectedCategory) {
+            continue;
+        }
+        if (!m_selectedTag.isEmpty() && !video.tags.contains(m_selectedTag)) {
+            continue;
+        }
+
+        auto *videoBox = new VideoBox(ui->videoScrollContents);
+        videoBox->setVideoInfo(video.title,
+                               video.userName,
+                               video.date,
+                               video.duration,
+                               video.playCount,
+                               video.likeCount);
+
+        connect(videoBox,
+                &VideoBox::videoClicked,
+                this,
+                [](const QString &title,
+                   const QString &userName,
+                   const QString &date,
+                   const QString &duration,
+                   const QString &playCount,
+                   const QString &likeCount) {
+                    auto *playerPage = new PlayerPage(title, userName, date, duration, playCount, likeCount);
+                    playerPage->setAttribute(Qt::WA_DeleteOnClose);
+                    playerPage->show();
+                });
+
+        ui->videoScrollLayout->addWidget(videoBox, visibleIndex / 4, visibleIndex % 4);
+        ++visibleIndex;
+    }
+}
+
 void player::initUI()
 {
     // setupUi() 会读取 player.ui 生成的界面结构，并把控件挂到 ui 指针上。
@@ -201,98 +391,8 @@ void player::initUI()
     ui->settingEntryBtn->setIcon(QIcon(":/images/myself/shezhi.png"));
     ui->settingEntryBtn->setIconSize(QSize(28, 28));
 
-    auto refreshButtonStyle = [](QPushButton *button) {
-        button->style()->unpolish(button);
-        button->style()->polish(button);
-        button->update();
-    };
-
-    auto setupTextButtonGroup = [refreshButtonStyle](QHBoxLayout *layout,
-                                                     const QStringList &texts,
-                                                     const QString &logPrefix) {
-        QList<QPushButton *> buttons;
-
-        for (int i = 0; i < texts.size(); ++i) {
-            auto *button = new QPushButton(texts[i]);
-            button->setObjectName("homeTextOption");
-            button->setCursor(Qt::PointingHandCursor);
-            button->setFlat(true);
-            button->setProperty("selected", i == 0);
-            button->setMinimumHeight(30);
-            button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-            buttons.append(button);
-            layout->addWidget(button);
-        }
-
-        for (auto *button : buttons) {
-            QObject::connect(button, &QPushButton::clicked, button, [buttons, button, refreshButtonStyle, logPrefix]() {
-                for (auto *item : buttons) {
-                    item->setProperty("selected", item == button);
-                    refreshButtonStyle(item);
-                }
-
-                LOG() << logPrefix << button->text();
-            });
-        }
-
-        layout->addStretch();
-    };
-
-    setupTextButtonGroup(ui->classifyHLayout,
-                         {"分类", "历史", "美食", "游戏", "科技", "运动", "动物", "旅游", "电影"},
-                         "切换分类:");
-    setupTextButtonGroup(ui->labelHLayout,
-                         {"标签", "中国史", "世界史", "美食测评", "美食制作", "游戏攻略"},
-                         "切换标签:");
-
-    ui->videoScrollLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-
-    struct StaticVideoInfo {
-        QString title;
-        QString userName;
-        QString date;
-        QString duration;
-        QString playCount;
-        QString likeCount;
-    };
-
-    const QList<StaticVideoInfo> videos = {
-        {"【北京旅游攻略】一条视频告诉你去了北京该怎么玩~", "用户昵称", "9-16", "25:52", "26.1万", "1226"},
-        {"一条视频告诉你去了北京该怎么玩~", "用户昵称", "9-16", "25:52", "26.1万", "1226"},
-        {"世界史入门：从文明起源讲到现代", "用户昵称", "9-16", "18:36", "18.8万", "935"},
-        {"美食测评：北京胡同里的宝藏小店", "用户昵称", "9-16", "12:08", "9.7万", "521"},
-        {"游戏攻略：新手也能快速上手的通关路线", "用户昵称", "9-16", "21:47", "32.4万", "2048"},
-        {"科技观察：一分钟看懂智能设备新趋势", "用户昵称", "9-16", "08:45", "7.2万", "318"},
-        {"运动训练：每天十分钟改善体态", "用户昵称", "9-16", "16:20", "11.3万", "746"},
-        {"动物世界：森林里的奇妙一天", "用户昵称", "9-16", "14:33", "15.6万", "889"},
-    };
-
-    for (int i = 0; i < videos.size(); ++i) {
-        auto *videoBox = new VideoBox(ui->videoScrollContents);
-        const auto &video = videos[i];
-        videoBox->setVideoInfo(video.title,
-                               video.userName,
-                               video.date,
-                               video.duration,
-                               video.playCount,
-                               video.likeCount);
-
-        connect(videoBox,
-                &VideoBox::videoClicked,
-                this,
-                [](const QString &title,
-                   const QString &userName,
-                   const QString &date,
-                   const QString &duration,
-                   const QString &playCount,
-                   const QString &likeCount) {
-                    auto *playerPage = new PlayerPage(title, userName, date, duration, playCount, likeCount);
-                    playerPage->setAttribute(Qt::WA_DeleteOnClose);
-                    playerPage->show();
-                });
-
-        ui->videoScrollLayout->addWidget(videoBox, i / 4, i % 4);
-    }
+    initHomeFilters();
+    renderHomeVideos();
 
     auto switchNavButton = [this](int index) {
         // 左侧导航按钮和右侧页面栈保持同一个 index，后续扩展新页面也更直观。
@@ -387,11 +487,6 @@ void player::initUI()
         LOG() << "点击编辑资料按钮，当前阶段暂不打开编辑资料页";
     });
     connect(ui->uploadEntryBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_isLoggedIn) {
-            showLoginWindow();
-            return;
-        }
-
         ui->uploadVideoPage->resetPage();
         ui->stackedWidget->setCurrentWidget(ui->uploadPage);
         ui->homePageBtn->setChecked(false);
@@ -497,13 +592,14 @@ void player::initUI()
             border: none;
         }
         QPushButton#homeTextOption {
-            min-width: 52px;
-            padding-left: 8px;
-            padding-right: 8px;
+            min-width: 44px;
+            min-height: 26px;
+            padding-left: 6px;
+            padding-right: 6px;
             border: none;
             color: #555b66;
             background: transparent;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: 600;
         }
         QPushButton#homeTextOption[selected="true"] {
