@@ -41,7 +41,11 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def create_server(host="127.0.0.1", port=8080):
+    return HTTPServer((host, port), MockVideosHandler)
+
+
 if __name__ == "__main__":
-    server = HTTPServer(("127.0.0.1", 8080), MockVideosHandler)
+    server = create_server()
     print("Mock video server running at http://127.0.0.1:8080/videos")
     server.serve_forever()
