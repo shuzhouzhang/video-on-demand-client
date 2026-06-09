@@ -1,6 +1,7 @@
 #ifndef DATACENTER_H
 #define DATACENTER_H
 
+#include <QByteArray>
 #include <QHash>
 #include <QList>
 #include <QString>
@@ -16,6 +17,8 @@ struct VideoInfo {
     QString category;
     QStringList tags;
 };
+
+QList<VideoInfo> parseVideosFromJson(const QByteArray &data);
 
 class DataCenter
 {

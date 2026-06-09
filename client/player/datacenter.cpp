@@ -1,9 +1,44 @@
 #include "datacenter.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+
 DataCenter &DataCenter::instance()
 {
     static DataCenter dataCenter;
     return dataCenter;
+}
+
+QList<VideoInfo> parseVideosFromJson(const QByteArray &data)
+{
+    QList<VideoInfo> videos;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(data);
+    const QJsonArray array = doc.array();
+
+    for (const QJsonValue &value : array) {
+        const QJsonObject obj = value.toObject();
+
+        VideoInfo video;
+        video.title = obj["title"].toString();
+        video.userName = obj["userName"].toString();
+        video.date = obj["date"].toString();
+        video.duration = obj["duration"].toString();
+        video.playCount = obj["playCount"].toString();
+        video.likeCount = obj["likeCount"].toString();
+        video.category = obj["category"].toString();
+
+        const QJsonArray tagArray = obj["tags"].toArray();
+        for (const QJsonValue &tagValue : tagArray) {
+            video.tags.append(tagValue.toString());
+        }
+
+        videos.append(video);
+    }
+
+    return videos;
 }
 
 DataCenter::DataCenter()
