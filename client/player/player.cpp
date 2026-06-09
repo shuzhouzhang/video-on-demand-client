@@ -1,6 +1,7 @@
 // player.cpp 实现主窗口逻辑。
 // 这里负责初始化 UI、连接按钮事件、切换右侧页面，以及处理无边框窗口拖拽。
 #include "player.h"
+#include "apiclient.h"
 #include "datacenter.h"
 #include "login.h"
 #include "ui_player.h"
@@ -172,6 +173,7 @@ void player::initHomeFilters()
 {
     m_selectedCategory.clear();
     m_selectedTag.clear();
+    m_homeVideos = DataCenter::instance().homeVideos();
     refreshHomeCategoryButtons();
     refreshHomeTagButtons();
 }
@@ -301,8 +303,7 @@ void player::renderHomeVideos()
     ui->videoScrollLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 
     int visibleIndex = 0;
-    const QList<VideoInfo> videos = DataCenter::instance().homeVideos();
-    for (const VideoInfo &video : videos) {
+    for (const VideoInfo &video : m_homeVideos) {
         if (!m_selectedCategory.isEmpty() && video.category != m_selectedCategory) {
             continue;
         }
@@ -335,6 +336,16 @@ void player::renderHomeVideos()
         ui->videoScrollLayout->addWidget(videoBox, visibleIndex / 4, visibleIndex % 4);
         ++visibleIndex;
     }
+}
+
+void player::setHomeVideos(const QList<VideoInfo> &videos)
+{
+    if (videos.isEmpty()) {
+        return;
+    }
+
+    m_homeVideos = videos;
+    renderHomeVideos();
 }
 
 void player::initUI()
@@ -393,6 +404,14 @@ void player::initUI()
 
     initHomeFilters();
     renderHomeVideos();
+
+    // ApiClient 是首页和后端视频接口的协作者；这里先显示本地数据，再异步尝试替换为接口数据。
+    m_apiClient = new ApiClient(this);
+    connect(m_apiClient, &ApiClient::videosLoaded, this, &player::setHomeVideos);
+    connect(m_apiClient, &ApiClient::requestFailed, this, [this](const QString &message) {
+        LOG() << "首页视频接口请求失败，继续使用本地兜底数据:" << message;
+    });
+    m_apiClient->fetchVideos();
 
     auto switchNavButton = [this](int index) {
         // 左侧导航按钮和右侧页面栈保持同一个 index，后续扩展新页面也更直观。

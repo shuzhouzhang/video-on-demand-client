@@ -8,6 +8,9 @@
 #include <QString>
 #include <QWidget>
 
+#include "datacenter.h"
+
+class ApiClient;
 class Login;
 class QEvent;
 class QLayout;
@@ -44,6 +47,7 @@ private:
     void refreshHomeCategoryButtons();
     void refreshHomeTagButtons();
     void renderHomeVideos();
+    void setHomeVideos(const QList<VideoInfo> &videos);
     void selectHomeCategory(const QString &category);
     void clearLayout(QLayout *layout);
     void showLoginWindow();
@@ -65,6 +69,8 @@ private:
     QString m_loginUserName;
     QString m_loginAccount;
     Login *m_loginWindow = nullptr;
+    ApiClient *m_apiClient = nullptr;
+    QList<VideoInfo> m_homeVideos;
     QString m_selectedCategory;
     QString m_selectedTag;
     QList<QPushButton *> m_categoryButtons;
