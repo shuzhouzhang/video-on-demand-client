@@ -340,6 +340,10 @@ void player::renderHomeVideos()
 
 void player::setHomeVideos(const QList<VideoInfo> &videos)
 {
+    // 这是什么：首页接收接口视频列表的入口函数。
+    // 为什么能实现：ApiClient 已把 JSON 转成 QList<VideoInfo>，这里只需要替换当前数据源并重绘卡片。
+    // 什么时候调用：ApiClient::videosLoaded 信号触发时由 Qt 自动调用。
+    // 和谁配合：m_homeVideos 保存当前首页数据，renderHomeVideos() 负责把数据变成 VideoBox。
     if (videos.isEmpty()) {
         return;
     }
@@ -405,7 +409,10 @@ void player::initUI()
     initHomeFilters();
     renderHomeVideos();
 
-    // ApiClient 是首页和后端视频接口的协作者；这里先显示本地数据，再异步尝试替换为接口数据。
+    // 这是什么：首页创建网络层对象并请求 /videos。
+    // 为什么这样做：先 renderHomeVideos() 显示 DataCenter 本地兜底数据，再异步请求接口，避免后端未启动时首页空白。
+    // 什么时候调用：主窗口 initUI() 初始化首页控件后调用一次。
+    // 和谁配合：ApiClient 请求 mock server/真实后端，成功走 setHomeVideos()，失败只记录日志并保留本地数据。
     m_apiClient = new ApiClient(this);
     connect(m_apiClient, &ApiClient::videosLoaded, this, &player::setHomeVideos);
     connect(m_apiClient, &ApiClient::requestFailed, this, [this](const QString &message) {
