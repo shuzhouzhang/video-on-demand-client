@@ -1,6 +1,7 @@
-// login.cpp 实现登录窗口的静态登录流程。
-// 当前阶段只做本地输入校验和登录成功信号，后续可在这里替换为真实登录接口。
+// login.cpp 实现登录窗口流程。
+// 当前阶段密码登录接临时 /login 接口，邮箱验证码登录仍保留本地模拟。
 #include "login.h"
+#include "apiclient.h"
 #include "ui_login.h"
 #include "util.h"
 
@@ -157,6 +158,7 @@ void Login::initUI()
     ui->logoLabel->setStyleSheet("border-image: url(:/images/login/biteshipin.png);");
     ui->accountEdit->setPlaceholderText("请输入邮箱或用户昵称");
     ui->passwordEdit->setEchoMode(QLineEdit::Password);
+    m_apiClient = new ApiClient(this);
 
     auto *modeWidget = new QWidget(this);
     auto *modeLayout = new QHBoxLayout(modeWidget);
@@ -223,6 +225,8 @@ void Login::initUI()
     connect(ui->passwordEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
     connect(m_emailEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
     connect(m_authcodeEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
+    connect(m_apiClient, &ApiClient::loginSucceeded, this, &Login::onLoginSucceeded);
+    connect(m_apiClient, &ApiClient::loginFailed, this, &Login::onLoginFailed);
 
     setStyleSheet(R"(
         QWidget#Login {
@@ -325,6 +329,10 @@ void Login::initUI()
 
 void Login::onLoginButtonClicked()
 {
+    if (m_isLoginRequesting) {
+        return;
+    }
+
     if (m_mode == Mode::Email) {
         const QString email = m_emailEdit->text().trimmed();
         const QString authcode = m_authcodeEdit->text().trimmed();
@@ -389,17 +397,40 @@ void Login::onLoginButtonClicked()
         return;
     }
 
-    const auto &users = accountStore();
-    const auto user = users.constFind(account);
-    if (user == users.constEnd() || user->password != password) {
-        QMessageBox::warning(this, "密码登录", "账号或密码错误");
-        ui->passwordEdit->setFocus();
-        return;
-    }
+    // 这是什么：把密码登录从本地账号表切到临时登录接口。
+    // 为什么能实现：ApiClient::login() 会异步 POST /login，并通过 loginSucceeded/loginFailed 返回结果。
+    // 什么时候调用：账号和密码的前端基础格式校验都通过后调用。
+    // 和谁配合：mock server 负责返回临时用户信息，onLoginSucceeded/onLoginFailed 负责更新界面状态。
+    m_isLoginRequesting = true;
+    ui->loginBtn->setEnabled(false);
+    ui->loginBtn->setText("登录中...");
+    m_apiClient->login(account, password);
+}
 
-    LOG() << "本地登录成功，账号:" << account << "昵称:" << user->nickname;
-    emit loginSuccess(user->nickname, account);
+void Login::onLoginSucceeded(const QString &userName, const QString &account)
+{
+    // 这是什么：处理临时登录接口成功结果。
+    // 为什么能实现：ApiClient 已经确认响应 success=true，并把 userName/account 从 JSON 中解析出来。
+    // 什么时候调用：ApiClient::loginSucceeded 信号触发时由 Qt 自动调用。
+    // 和谁配合：继续发已有 loginSuccess 信号，让 player.cpp 不用改也能更新“我的”页面。
+    m_isLoginRequesting = false;
+    ui->loginBtn->setEnabled(true);
+    LOG() << "接口登录成功，账号:" << account << "昵称:" << userName;
+    emit loginSuccess(userName, account);
     close();
+}
+
+void Login::onLoginFailed(const QString &message)
+{
+    // 这是什么：处理临时登录接口失败结果。
+    // 为什么能实现：ApiClient 会把网络错误、响应格式错误和业务失败都统一转成 message。
+    // 什么时候调用：ApiClient::loginFailed 信号触发时由 Qt 自动调用。
+    // 和谁配合：登录按钮恢复可点，QMessageBox 把失败原因展示给用户。
+    m_isLoginRequesting = false;
+    ui->loginBtn->setEnabled(true);
+    ui->loginBtn->setText(m_mode == Mode::Email ? "登录/注册" : "登录");
+    QMessageBox::warning(this, "密码登录", message);
+    ui->passwordEdit->setFocus();
 }
 
 void Login::onRegisterButtonClicked()

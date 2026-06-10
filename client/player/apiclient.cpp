@@ -1,5 +1,7 @@
 #include "apiclient.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -52,6 +54,59 @@ void ApiClient::fetchVideos()
         // 什么时候调用：网络成功且 JSON 至少解析出一个视频后调用。
         // 和谁配合：player.cpp 更新 m_homeVideos 并重新 renderHomeVideos()。
         emit videosLoaded(videos);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::login(const QString &account, const QString &password)
+{
+    // 这是什么：描述一次 POST /login 请求。
+    // 为什么能实现：登录接口需要把账号密码作为 JSON 请求体发给后端，QNetworkRequest 保存 URL 和 Content-Type。
+    // 什么时候调用：Login 的密码登录表单通过本地基础校验后调用。
+    // 和谁配合：m_loginUrl 指向 mock server 或真实后端的登录接口。
+    QNetworkRequest request(m_loginUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonObject payload;
+    payload["account"] = account;
+    payload["password"] = password;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    // 这是什么：真正发起登录 POST 请求，并拿到本次响应对象。
+    // 为什么能实现：post() 会异步发送请求体，响应回来后通过 QNetworkReply::finished 通知。
+    // 什么时候调用：登录请求体准备好后立刻调用。
+    // 和谁配合：下面的 finished 槽函数负责读取响应并决定成功或失败。
+    QNetworkReply *reply = m_networkManager->post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理临时登录接口返回结果。
+        // 为什么能实现：finished 触发时 reply 已经包含网络状态和响应体，可以统一做错误处理和 JSON 解析。
+        // 什么时候调用：Qt 事件循环收到 POST /login 完成信号时自动调用。
+        // 和谁配合：成功发 loginSucceeded 给 Login，失败发 loginFailed 让 Login 提示用户。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit loginFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        const bool success = obj["success"].toBool(false);
+        if (!success) {
+            const QString message = obj["message"].toString("账号或密码错误");
+            emit loginFailed(message);
+            reply->deleteLater();
+            return;
+        }
+
+        const QString userName = obj["userName"].toString();
+        const QString loginAccount = obj["account"].toString();
+        if (userName.isEmpty() || loginAccount.isEmpty()) {
+            emit loginFailed("登录响应缺少用户信息");
+            reply->deleteLater();
+            return;
+        }
+
+        emit loginSucceeded(userName, loginAccount);
         reply->deleteLater();
     });
 }

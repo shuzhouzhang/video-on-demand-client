@@ -31,6 +31,12 @@ public:
     // 和谁配合：请求成功发 videosLoaded 给 player.cpp，请求失败发 requestFailed 让页面继续使用本地兜底数据。
     void fetchVideos();
 
+    // 这是什么：请求临时用户登录接口。
+    // 为什么能实现：把账号密码组装成 JSON，用 QNetworkAccessManager::post() 发送到 mock/后端的 /login。
+    // 什么时候调用：登录窗口密码登录校验通过后调用。
+    // 和谁配合：Login 负责收集输入和展示结果，ApiClient 负责发送请求并发出登录成功/失败信号。
+    void login(const QString &account, const QString &password);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -44,12 +50,30 @@ signals:
     // 和谁配合：player.cpp 记录日志并保留 DataCenter::homeVideos() 作为兜底展示。
     void requestFailed(const QString &message);
 
+    // 这是什么：临时登录接口成功后的通知信号。
+    // 为什么能实现：/login 响应 JSON 中包含 success、userName、account，解析成功后可以把用户信息交回界面。
+    // 什么时候触发：login() 收到 success=true 且 userName/account 非空的响应后触发。
+    // 和谁配合：Login 收到后继续发已有 loginSuccess 信号，让 player.cpp 更新“我的”页面。
+    void loginSucceeded(const QString &userName, const QString &account);
+
+    // 这是什么：临时登录接口失败后的通知信号。
+    // 为什么能实现：网络错误、JSON 格式错误或 success=false 都会产生可展示的错误信息。
+    // 什么时候触发：login() 请求失败、响应异常或账号密码不匹配时触发。
+    // 和谁配合：Login 收到后恢复登录按钮并弹出提示。
+    void loginFailed(const QString &message);
+
 private:
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
     // 什么时候使用：fetchVideos() 创建 QNetworkRequest 时使用。
     // 和谁配合：tools/mock_videos_server.py 当前提供同路径的 /videos 响应。
     QUrl m_videosUrl = QUrl("http://127.0.0.1:8080/videos");
+
+    // 这是什么：当前临时登录接口地址。
+    // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换这里或抽出 baseUrl。
+    // 什么时候使用：login() 创建 POST /login 请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 提供同路径的临时登录响应。
+    QUrl m_loginUrl = QUrl("http://127.0.0.1:8080/login");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

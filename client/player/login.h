@@ -10,6 +10,7 @@ class QMouseEvent;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class ApiClient;
 
 namespace Ui {
 class Login;
@@ -45,6 +46,8 @@ private:
     void onLoginButtonClicked();
     void onRegisterButtonClicked();
     void onAuthcodeButtonClicked();
+    void onLoginSucceeded(const QString &userName, const QString &account);
+    void onLoginFailed(const QString &message);
     void switchMode(Mode mode);
     void clearInputs();
     void refreshModeButtons();
@@ -58,10 +61,12 @@ private:
     QPushButton *m_authcodeBtn = nullptr;
     QLabel *m_authcodeLabel = nullptr;
     QLineEdit *m_authcodeEdit = nullptr;
+    ApiClient *m_apiClient = nullptr;
     QString m_authcodeId;
     QString m_authcodeValue;
     QString m_authcodeEmail;
     Mode m_mode = Mode::Email;
+    bool m_isLoginRequesting = false;
     bool m_isDragging = false;
     QPoint m_dragOffset;
 };
