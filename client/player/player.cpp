@@ -341,14 +341,15 @@ void player::renderHomeVideos()
 void player::setHomeVideos(const QList<VideoInfo> &videos)
 {
     // 这是什么：首页接收接口视频列表的入口函数。
-    // 为什么能实现：ApiClient 已把 JSON 转成 QList<VideoInfo>，这里只需要替换当前数据源并重绘卡片。
+    // 为什么能实现：ApiClient 已把 JSON 转成 QList<VideoInfo>，这里先交给 DataCenter 保存，再读取最新数据重绘卡片。
     // 什么时候调用：ApiClient::videosLoaded 信号触发时由 Qt 自动调用。
-    // 和谁配合：m_homeVideos 保存当前首页数据，renderHomeVideos() 负责把数据变成 VideoBox。
+    // 和谁配合：DataCenter 统一管理首页视频数据，m_homeVideos 作为当前页面筛选和渲染缓存。
     if (videos.isEmpty()) {
         return;
     }
 
-    m_homeVideos = videos;
+    DataCenter::instance().setHomeVideos(videos);
+    m_homeVideos = DataCenter::instance().homeVideos();
     renderHomeVideos();
 }
 

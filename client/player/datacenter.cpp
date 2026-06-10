@@ -13,6 +13,10 @@ DataCenter &DataCenter::instance()
 
 QList<VideoInfo> parseVideosFromJson(const QByteArray &data)
 {
+    // 这是什么：把接口响应体里的 JSON 数组转换成 QList<VideoInfo>。
+    // 为什么能实现：QJsonDocument 先把 QByteArray 解析成 JSON 文档，再按每个对象的字段填充 VideoInfo。
+    // 什么时候调用：ApiClient 收到 /videos 响应并且网络没有报错后调用。
+    // 和谁配合：ApiClient 负责发请求和读响应，player/DataCenter 负责保存和展示解析结果。
     QList<VideoInfo> videos;
 
     const QJsonDocument doc = QJsonDocument::fromJson(data);
@@ -91,7 +95,24 @@ QStringList DataCenter::allTags() const
 
 QList<VideoInfo> DataCenter::homeVideos() const
 {
+    // 这是什么：返回当前首页使用的视频数据。
+    // 为什么能实现：m_homeVideos 始终保存首页当前数据源，默认是假数据，接口成功后会变成响应数据。
+    // 什么时候调用：首页初始化、接口数据刷新后、分类和标签筛选重新渲染时调用。
+    // 和谁配合：player.cpp 把返回结果放入页面缓存 m_homeVideos，再交给 renderHomeVideos() 生成 VideoBox。
     return m_homeVideos;
+}
+
+void DataCenter::setHomeVideos(const QList<VideoInfo> &videos)
+{
+    // 这是什么：把接口返回的视频列表写进 DataCenter。
+    // 为什么能实现：ApiClient 已经完成 JSON 到 VideoInfo 的转换，这里只负责保存当前可展示的数据源。
+    // 什么时候调用：首页收到 ApiClient::videosLoaded 信号并确认列表非空后调用。
+    // 和谁配合：homeVideos() 随后把最新数据交回 player.cpp，用来刷新首页卡片和筛选结果。
+    if (videos.isEmpty()) {
+        return;
+    }
+
+    m_homeVideos = videos;
 }
 
 void DataCenter::addBarrage(const QString &videoKey, int seconds, const QString &text)
