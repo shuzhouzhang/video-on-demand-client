@@ -1,5 +1,6 @@
 #include "apiclient.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -107,6 +108,62 @@ void ApiClient::login(const QString &account, const QString &password)
         }
 
         emit loginSucceeded(userName, loginAccount);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::uploadVideo(const UploadVideoInfo &info)
+{
+    // 这是什么：描述一次 POST /videos 上传元数据请求。
+    // 为什么能实现：第一版上传只需要 JSON 元数据，QNetworkRequest 设置好 URL 和 Content-Type 后即可发送。
+    // 什么时候调用：UploadVideoPage 完成本地表单校验，并准备好当前用户信息后调用。
+    // 和谁配合：m_uploadVideoUrl 指向 mock server 或真实后端的视频发布接口。
+    QNetworkRequest request(m_uploadVideoUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QJsonArray tagArray;
+    for (const QString &tag : info.tags) {
+        tagArray.append(tag);
+    }
+
+    QJsonObject payload;
+    payload["title"] = info.title;
+    payload["description"] = info.description;
+    payload["category"] = info.category;
+    payload["tags"] = tagArray;
+    payload["userName"] = info.userName;
+    payload["account"] = info.account;
+    payload["videoFileName"] = info.videoFileName;
+    payload["coverFileName"] = info.coverFileName;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    // 这是什么：真正发送上传元数据请求。
+    // 为什么能实现：post() 异步发送 JSON，请求结束后通过 finished 信号读取后端发布结果。
+    // 什么时候调用：上传请求体构造完成后立刻调用。
+    // 和谁配合：下面的 finished 槽函数把响应转成 uploadSucceeded/uploadFailed。
+    QNetworkReply *reply = m_networkManager->post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理上传视频元数据接口返回结果。
+        // 为什么能实现：finished 触发时 reply 里已有网络状态和响应体，可统一解析 success/message。
+        // 什么时候调用：Qt 事件循环收到 POST /videos 完成信号时自动调用。
+        // 和谁配合：成功通知上传页收尾，失败通知上传页恢复按钮并显示错误。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit uploadFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        const bool success = obj["success"].toBool(false);
+        const QString message = obj["message"].toString(success ? "发布成功" : "发布失败");
+        if (!success) {
+            emit uploadFailed(message);
+            reply->deleteLater();
+            return;
+        }
+
+        emit uploadSucceeded(message);
         reply->deleteLater();
     });
 }

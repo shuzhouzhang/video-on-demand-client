@@ -1,6 +1,7 @@
-// uploadvideopage.cpp 实现上传视频页面的静态表单流程。
-// 当前阶段只做本地文件选择、表单校验和页面切换，不做真实网络上传。
+// uploadvideopage.cpp 实现上传视频页面流程。
+// 当前阶段选择本地文件并把视频元数据提交到临时上传接口，不传真实视频二进制。
 #include "uploadvideopage.h"
+#include "apiclient.h"
 #include "datacenter.h"
 #include "ui_uploadvideopage.h"
 #include "util.h"
@@ -72,6 +73,7 @@ void UploadVideoPage::resetPage()
 void UploadVideoPage::initUI()
 {
     ui->setupUi(this);
+    m_apiClient = new ApiClient(this);
 
     ui->downIconLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/wancheng.png);");
     ui->fileIconLabel->setStyleSheet("border-image: url(:/images/uploadVideoPage/wenjian.png);");
@@ -93,6 +95,8 @@ void UploadVideoPage::initUI()
         emit backToMyPage();
     });
     connect(ui->commitBtn, &QPushButton::clicked, this, &UploadVideoPage::commitUpload);
+    connect(m_apiClient, &ApiClient::uploadSucceeded, this, &UploadVideoPage::onUploadSucceeded);
+    connect(m_apiClient, &ApiClient::uploadFailed, this, &UploadVideoPage::onUploadFailed);
 
     resetPage();
 
@@ -371,6 +375,10 @@ void UploadVideoPage::chooseCover()
 
 void UploadVideoPage::commitUpload()
 {
+    if (m_isUploadRequesting) {
+        return;
+    }
+
     if (m_videoPath.isEmpty()) {
         QMessageBox::warning(this, "上传视频", "请先选择视频文件");
         return;
@@ -395,15 +403,58 @@ void UploadVideoPage::commitUpload()
         return;
     }
 
-    LOG() << "静态发布视频:"
+    if (!DataCenter::instance().isLoggedIn()) {
+        QMessageBox::warning(this, "上传视频", "请先登录后再发布");
+        return;
+    }
+
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    const QFileInfo videoFileInfo(m_videoPath);
+    const QFileInfo coverFileInfo(m_coverPath);
+    UploadVideoInfo uploadInfo;
+    uploadInfo.title = title;
+    uploadInfo.description = ui->descEdit->toPlainText().trimmed();
+    uploadInfo.category = category;
+    uploadInfo.tags = selectedTags();
+    uploadInfo.userName = currentUser.userName;
+    uploadInfo.account = currentUser.account;
+    uploadInfo.videoFileName = videoFileInfo.fileName();
+    uploadInfo.coverFileName = coverFileInfo.fileName();
+
+    // 这是什么：把上传页表单提交给临时上传接口。
+    // 为什么能实现：ApiClient::uploadVideo() 会把 UploadVideoInfo 转成 JSON，并异步 POST 到 /videos。
+    // 什么时候调用：视频、标题、分类、标签数量和登录状态都校验通过后调用。
+    // 和谁配合：DataCenter 提供当前用户，ApiClient 负责网络请求，onUploadSucceeded/onUploadFailed 负责收尾。
+    setCommitButtonRequesting(true);
+    LOG() << "接口发布视频:"
           << "videoPath=" << m_videoPath
           << "title=" << title
           << "category=" << category
-          << "coverPath=" << m_coverPath;
-    QMessageBox::information(this, "上传视频", "发布成功");
+          << "coverPath=" << m_coverPath
+          << "account=" << currentUser.account;
+    m_apiClient->uploadVideo(uploadInfo);
+}
 
+void UploadVideoPage::onUploadSucceeded(const QString &message)
+{
+    // 这是什么：处理上传元数据接口成功结果。
+    // 为什么能实现：ApiClient 已确认 POST /videos 返回 success=true，并把 message 传回页面。
+    // 什么时候调用：ApiClient::uploadSucceeded 信号触发时由 Qt 自动调用。
+    // 和谁配合：上传按钮恢复、页面重置，并通过 backToMyPage 回到“我的”页面。
+    setCommitButtonRequesting(false);
+    QMessageBox::information(this, "上传视频", message.isEmpty() ? "发布成功" : message);
     resetPage();
     emit backToMyPage();
+}
+
+void UploadVideoPage::onUploadFailed(const QString &message)
+{
+    // 这是什么：处理上传元数据接口失败结果。
+    // 为什么能实现：ApiClient 会把网络错误、响应格式错误或后端业务失败统一转成 message。
+    // 什么时候调用：ApiClient::uploadFailed 信号触发时由 Qt 自动调用。
+    // 和谁配合：上传按钮恢复可点，QMessageBox 把失败原因展示给用户。
+    setCommitButtonRequesting(false);
+    QMessageBox::warning(this, "上传视频", message.isEmpty() ? "发布失败" : message);
 }
 
 int UploadVideoPage::selectedTagCount() const
@@ -416,4 +467,31 @@ int UploadVideoPage::selectedTagCount() const
         }
     }
     return count;
+}
+
+QStringList UploadVideoPage::selectedTags() const
+{
+    // 这是什么：收集上传页当前已选择的标签文本。
+    // 为什么能实现：已选标签都以 objectName=tagButton 的 QPushButton 形式放在 tagWidget 里。
+    // 什么时候调用：发布前构造 UploadVideoInfo 时调用。
+    // 和谁配合：ApiClient::uploadVideo() 会把返回的 QStringList 转成 JSON 数组发送给后端。
+    QStringList tags;
+    const QList<QPushButton *> buttons = ui->tagWidget->findChildren<QPushButton *>("tagButton");
+    for (const auto *button : buttons) {
+        if (button->isChecked()) {
+            tags.append(button->text());
+        }
+    }
+    return tags;
+}
+
+void UploadVideoPage::setCommitButtonRequesting(bool requesting)
+{
+    // 这是什么：切换发布按钮的请求中状态。
+    // 为什么能实现：网络请求是异步的，禁用按钮可以避免用户连续点击发出重复 POST /videos。
+    // 什么时候调用：开始上传前置为 true，上传成功或失败后恢复为 false。
+    // 和谁配合：commitUpload()、onUploadSucceeded()、onUploadFailed() 共同维护这一个状态。
+    m_isUploadRequesting = requesting;
+    ui->commitBtn->setEnabled(!requesting);
+    ui->commitBtn->setText(requesting ? "发布中..." : "发布");
 }

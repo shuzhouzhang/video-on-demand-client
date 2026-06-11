@@ -55,15 +55,6 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.write_json(200, VIDEOS)
 
     def do_POST(self):
-        # 这是什么：处理临时登录接口 POST /login。
-        # 为什么能实现：从请求体读取 account/password，和 USERS 里的临时账号做匹配。
-        # 什么时候调用：Qt 登录页或通信测试向 mock server 发送登录请求时调用。
-        # 和谁配合：ApiClient::login() 发送 JSON，Login 根据 success/message 展示登录结果。
-        if self.path != "/login":
-            self.send_response(404)
-            self.end_headers()
-            return
-
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length).decode("utf-8")
         try:
@@ -72,6 +63,22 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.write_json(200, {"success": False, "message": "请求格式错误"})
             return
 
+        if self.path == "/login":
+            self.handle_login(payload)
+            return
+
+        if self.path == "/videos":
+            self.handle_upload_video(payload)
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def handle_login(self, payload):
+        # 这是什么：处理临时登录接口 POST /login。
+        # 为什么能实现：从请求体读取 account/password，和 USERS 里的临时账号做匹配。
+        # 什么时候调用：Qt 登录页或通信测试向 mock server 发送登录请求时调用。
+        # 和谁配合：ApiClient::login() 发送 JSON，Login 根据 success/message 展示登录结果。
         account = str(payload.get("account", "")).strip()
         password = str(payload.get("password", ""))
         user = USERS.get(account)
@@ -81,6 +88,31 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         self.write_json(200, {"success": True, "userName": user["userName"], "account": account})
 
+    def handle_upload_video(self, payload):
+        # 这是什么：处理上传视频元数据接口 POST /videos。
+        # 为什么能实现：第一版只校验 JSON 元数据，不接收真实视频二进制，mock server 可以直接返回发布结果。
+        # 什么时候调用：Qt 上传页点击发布并通过 ApiClient::uploadVideo() 发送请求时调用。
+        # 和谁配合：UploadVideoPage 收集表单字段，ApiClient 发送 JSON，通信测试验证成功和失败场景。
+        title = str(payload.get("title", "")).strip()
+        account = str(payload.get("account", "")).strip()
+        category = str(payload.get("category", "")).strip()
+        video_file_name = str(payload.get("videoFileName", "")).strip()
+
+        if not title:
+            self.write_json(200, {"success": False, "message": "视频标题不能为空"})
+            return
+        if not account:
+            self.write_json(200, {"success": False, "message": "请先登录后再发布"})
+            return
+        if not category:
+            self.write_json(200, {"success": False, "message": "请选择视频分类"})
+            return
+        if not video_file_name:
+            self.write_json(200, {"success": False, "message": "请先选择视频文件"})
+            return
+
+        self.write_json(200, {"success": True, "message": "发布成功"})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -88,5 +120,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at http://127.0.0.1:8080/videos and POST http://127.0.0.1:8080/login")
+    print("Mock server running at GET/POST http://127.0.0.1:8080/videos and POST http://127.0.0.1:8080/login")
     server.serve_forever()

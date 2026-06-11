@@ -4,11 +4,27 @@
 #include <QObject>
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <QUrl>
 
 #include "datacenter.h"
 
 class QNetworkAccessManager;
+
+// 这是什么：上传视频接口第一版需要发送的元数据。
+// 为什么这样做：第一阶段只联调表单字段，不传真实文件二进制，用结构体把页面字段整理后交给 ApiClient。
+// 什么时候使用：上传页表单校验通过后创建它，并调用 ApiClient::uploadVideo()。
+// 和谁配合：UploadVideoPage 负责填充字段，mock/后端 POST /videos 负责接收 JSON。
+struct UploadVideoInfo {
+    QString title;
+    QString description;
+    QString category;
+    QStringList tags;
+    QString userName;
+    QString account;
+    QString videoFileName;
+    QString coverFileName;
+};
 
 // 这是什么：ApiClient 是客户端访问后端接口的统一入口。
 // 为什么这样做：把 HTTP 请求、响应读取、JSON 解析从页面代码里拆出来，避免 player.cpp 既管 UI 又管网络。
@@ -37,6 +53,12 @@ public:
     // 和谁配合：Login 负责收集输入和展示结果，ApiClient 负责发送请求并发出登录成功/失败信号。
     void login(const QString &account, const QString &password);
 
+    // 这是什么：请求上传视频元数据接口。
+    // 为什么能实现：把上传页整理好的 UploadVideoInfo 转成 JSON，用 POST /videos 发给 mock/后端。
+    // 什么时候调用：上传页表单校验通过，并确认当前用户已登录后调用。
+    // 和谁配合：UploadVideoPage 收集表单并响应 uploadSucceeded/uploadFailed 信号。
+    void uploadVideo(const UploadVideoInfo &info);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -62,6 +84,18 @@ signals:
     // 和谁配合：Login 收到后恢复登录按钮并弹出提示。
     void loginFailed(const QString &message);
 
+    // 这是什么：上传视频元数据成功后的通知信号。
+    // 为什么能实现：POST /videos 返回 success=true 时，ApiClient 可以把 message 交回上传页。
+    // 什么时候触发：uploadVideo() 收到成功响应并解析出 message 后触发。
+    // 和谁配合：UploadVideoPage 收到后提示成功、重置页面并返回“我的”页。
+    void uploadSucceeded(const QString &message);
+
+    // 这是什么：上传视频元数据失败后的通知信号。
+    // 为什么能实现：网络错误、JSON 异常或 success=false 都会被统一转成可展示的 message。
+    // 什么时候触发：uploadVideo() 请求失败或后端拒绝本次发布时触发。
+    // 和谁配合：UploadVideoPage 收到后恢复发布按钮并提示错误原因。
+    void uploadFailed(const QString &message);
+
 private:
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
@@ -74,6 +108,12 @@ private:
     // 什么时候使用：login() 创建 POST /login 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 提供同路径的临时登录响应。
     QUrl m_loginUrl = QUrl("http://127.0.0.1:8080/login");
+
+    // 这是什么：当前上传视频元数据接口地址。
+    // 为什么这样做：第一版沿用 REST 风格，GET /videos 获取列表，POST /videos 发布新视频元数据。
+    // 什么时候使用：uploadVideo() 创建 POST /videos 请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 处理同路径的上传请求。
+    QUrl m_uploadVideoUrl = QUrl("http://127.0.0.1:8080/videos");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

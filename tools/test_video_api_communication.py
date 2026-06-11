@@ -60,6 +60,45 @@ def main():
         assert login_failed["message"], "failed login should return message"
 
         print("OK: /login communication test passed")
+
+        upload_success = post_json(
+            "http://127.0.0.1:8080/videos",
+            {
+                "title": "测试上传视频",
+                "description": "这是一次上传接口联调",
+                "category": "科技",
+                "tags": ["编程开发", "软件工具"],
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+                "videoFileName": "demo.mp4",
+                "coverFileName": "cover.png",
+            },
+        )
+        assert upload_success["success"] is True, "upload should succeed with required metadata"
+
+        upload_missing_title = post_json(
+            "http://127.0.0.1:8080/videos",
+            {
+                "title": "",
+                "category": "科技",
+                "account": "bit-user-001",
+                "videoFileName": "demo.mp4",
+            },
+        )
+        assert upload_missing_title["success"] is False, "upload should fail without title"
+
+        upload_missing_account = post_json(
+            "http://127.0.0.1:8080/videos",
+            {
+                "title": "测试上传视频",
+                "category": "科技",
+                "account": "",
+                "videoFileName": "demo.mp4",
+            },
+        )
+        assert upload_missing_account["success"] is False, "upload should fail without account"
+
+        print("OK: /videos upload communication test passed")
     finally:
         server.shutdown()
         server.server_close()
