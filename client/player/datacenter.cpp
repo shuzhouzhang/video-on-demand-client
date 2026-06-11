@@ -115,6 +115,34 @@ void DataCenter::setHomeVideos(const QList<VideoInfo> &videos)
     m_homeVideos = videos;
 }
 
+void DataCenter::setCurrentUser(const QString &userName, const QString &account)
+{
+    // 这是什么：把当前登录用户写进 DataCenter。
+    // 为什么能实现：登录成功时传入的 userName/account 已经由接口或本地邮箱流程确认可用。
+    // 什么时候调用：player::updateLoginState() 收到 Login::loginSuccess 后调用。
+    // 和谁配合：currentUser() 和 isLoggedIn() 后续都基于这份状态返回结果。
+    m_currentUser.userName = userName.trimmed();
+    m_currentUser.account = account.trimmed();
+}
+
+UserInfo DataCenter::currentUser() const
+{
+    // 这是什么：返回当前登录用户。
+    // 为什么能实现：DataCenter 是单例，登录成功写入后，同一进程内其它页面读到的是同一份内存状态。
+    // 什么时候调用：“我的”页面刷新用户信息或后续页面需要当前账号时调用。
+    // 和谁配合：player.cpp 用返回值更新昵称、账号文本。
+    return m_currentUser;
+}
+
+bool DataCenter::isLoggedIn() const
+{
+    // 这是什么：返回当前是否处于登录状态。
+    // 为什么能实现：临时登录阶段没有 token，账号非空就是最小可用的登录标记。
+    // 什么时候调用：用户点击需要登录的入口前调用。
+    // 和谁配合：player.cpp 用它决定是否弹出 Login 窗口。
+    return !m_currentUser.account.isEmpty();
+}
+
 void DataCenter::addBarrage(const QString &videoKey, int seconds, const QString &text)
 {
     const QString trimmedText = text.trimmed();

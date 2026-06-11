@@ -64,10 +64,6 @@ private:
     // 窗口移动时要靠它计算新位置。
     QPoint m_dragOffset;
 
-    // 第一版登录只保存前端状态，后续接后端时再替换为真实 session/token。
-    bool m_isLoggedIn = false;
-    QString m_loginUserName;
-    QString m_loginAccount;
     Login *m_loginWindow = nullptr;
     ApiClient *m_apiClient = nullptr;
     QList<VideoInfo> m_homeVideos;

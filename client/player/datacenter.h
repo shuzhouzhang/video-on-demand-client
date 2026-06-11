@@ -18,6 +18,15 @@ struct VideoInfo {
     QStringList tags;
 };
 
+// 这是什么：当前登录用户的轻量信息。
+// 为什么这样做：只保存页面当前需要展示和判断登录状态的字段，避免提前引入 token、权限等复杂状态。
+// 什么时候使用：登录接口或邮箱模拟登录成功后写入，页面需要判断当前用户时读取。
+// 和谁配合：Login 发出登录成功信号，player.cpp 写入 DataCenter 并刷新“我的”页面。
+struct UserInfo {
+    QString userName;
+    QString account;
+};
+
 // 这是什么：把后端 /videos 返回的 JSON 响应解析成首页能使用的视频列表。
 // 为什么能实现：VideoInfo 字段和 mock/后端 JSON 字段一一对应，解析后页面不用再关心原始 JSON。
 // 什么时候调用：ApiClient 收到 QNetworkReply 响应体并确认网络请求成功后调用。
@@ -45,6 +54,24 @@ public:
     // 和谁配合：homeVideos() 负责把保存后的数据再交给首页读取和展示。
     void setHomeVideos(const QList<VideoInfo> &videos);
 
+    // 这是什么：保存当前登录用户信息。
+    // 为什么能实现：登录成功后已经拿到 userName/account，DataCenter 只负责内存保存这份当前状态。
+    // 什么时候调用：Login::loginSuccess 触发后，player::updateLoginState() 接收到用户信息时调用。
+    // 和谁配合：currentUser() 和 isLoggedIn() 让页面后续都从同一个地方读取登录状态。
+    void setCurrentUser(const QString &userName, const QString &account);
+
+    // 这是什么：读取当前登录用户信息。
+    // 为什么能实现：setCurrentUser() 会把最近一次登录成功的 userName/account 写入 m_currentUser。
+    // 什么时候调用：页面需要刷新昵称、账号或给后续功能拿当前用户时调用。
+    // 和谁配合：player.cpp 用它更新“我的”页面展示。
+    UserInfo currentUser() const;
+
+    // 这是什么：判断当前是否已经登录。
+    // 为什么能实现：临时登录阶段只要 currentUser 的账号不为空，就认为已有有效登录状态。
+    // 什么时候调用：点击头像、资料、作品、关注、设置等需要登录的入口前调用。
+    // 和谁配合：player.cpp 用它决定是打开登录窗口还是继续执行当前操作。
+    bool isLoggedIn() const;
+
     void addBarrage(const QString &videoKey, int seconds, const QString &text);
     QStringList barragesAt(const QString &videoKey, int seconds) const;
     void clearBarrages(const QString &videoKey);
@@ -55,6 +82,7 @@ private:
     QStringList m_categories;
     QHash<QString, QStringList> m_categoryTags;
     QList<VideoInfo> m_homeVideos;
+    UserInfo m_currentUser;
     QHash<QString, QHash<int, QStringList>> m_barragesByVideo;
 };
 

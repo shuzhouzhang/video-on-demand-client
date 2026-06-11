@@ -110,7 +110,7 @@ void player::mouseReleaseEvent(QMouseEvent *event)
 bool player::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == ui->myNickNameLabel && event->type() == QEvent::MouseButtonRelease) {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return true;
         }
@@ -121,7 +121,7 @@ bool player::eventFilter(QObject *watched, QEvent *event)
 
 void player::showLoginWindow()
 {
-    if (m_isLoggedIn) {
+    if (DataCenter::instance().isLoggedIn()) {
         return;
     }
 
@@ -143,15 +143,18 @@ void player::showLoginWindow()
 
 void player::updateLoginState(const QString &userName, const QString &account)
 {
-    m_isLoggedIn = true;
-    m_loginUserName = userName;
-    m_loginAccount = account;
+    // 这是什么：处理登录窗口返回的登录成功结果，并刷新“我的”页面。
+    // 为什么能实现：Login 已经通过接口或邮箱模拟拿到 userName/account，这里先写入 DataCenter 再读取展示。
+    // 什么时候调用：Login::loginSuccess 信号触发时由 Qt 自动调用。
+    // 和谁配合：Login 负责登录流程，DataCenter 保存当前用户，当前页面负责把用户信息显示出来。
+    DataCenter::instance().setCurrentUser(userName, account);
+    const UserInfo currentUser = DataCenter::instance().currentUser();
 
-    ui->myNickNameLabel->setText(userName);
-    ui->myAccountLabel->setText("账号：" + account);
+    ui->myNickNameLabel->setText(currentUser.userName);
+    ui->myAccountLabel->setText("账号：" + currentUser.account);
     ui->myDescLabel->setText("欢迎回来，开始管理你的个人资料和视频内容吧");
 
-    LOG() << "我的页面已切换到登录状态:" << account;
+    LOG() << "我的页面已切换到登录状态:" << currentUser.account;
 }
 
 void player::clearLayout(QLayout *layout)
@@ -474,7 +477,7 @@ void player::initUI()
         LOG() << "点击搜索按钮，关键词:" << ui->searchEdit->text();
     });
     connect(ui->myAvatarBtn, &QPushButton::clicked, this, [this, setMyAvatar]() {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;
         }
@@ -506,7 +509,7 @@ void player::initUI()
         LOG() << "本地头像预览已更新:" << fileName;
     });
     connect(ui->editProfileBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;
         }
@@ -525,7 +528,7 @@ void player::initUI()
         LOG() << "进入上传视频页面";
     });
     connect(ui->myVideoEntryBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;
         }
@@ -533,7 +536,7 @@ void player::initUI()
         LOG() << "点击我的视频入口，当前阶段暂不加载作品列表";
     });
     connect(ui->followEntryBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;
         }
@@ -541,7 +544,7 @@ void player::initUI()
         LOG() << "点击我的关注入口，当前阶段暂不加载关注列表";
     });
     connect(ui->settingEntryBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_isLoggedIn) {
+        if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;
         }
