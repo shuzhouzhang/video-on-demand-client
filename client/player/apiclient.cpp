@@ -208,3 +208,100 @@ void ApiClient::fetchPlayUrl()
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchBarrages(const QString &videoKey)
+{
+    // 这是什么：描述一次 GET /videos/barrages 请求。
+    // 为什么能实现：第一版 mock 弹幕接口暂不依赖 query 参数，播放页只需请求固定地址即可拿到测试弹幕。
+    // 什么时候调用：播放页确定 m_videoKey 后调用。
+    // 和谁配合：返回的弹幕按秒数整理后交给 PlayerPage/DataCenter。
+    Q_UNUSED(videoKey);
+    QNetworkRequest request(m_barragesUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理弹幕列表接口返回结果。
+        // 为什么能实现：finished 时 response body 已完整可读，可以把 JSON 数组整理成按秒分组的哈希表。
+        // 什么时候调用：Qt 事件循环收到 GET /videos/barrages 完成信号时自动调用。
+        // 和谁配合：PlayerPage 收到 barragesLoaded 后写入 DataCenter。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit barrageRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit barrageRequestFailed(obj["message"].toString("弹幕加载失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        QHash<int, QStringList> barragesBySecond;
+        const QJsonArray barrages = obj["barrages"].toArray();
+        for (const QJsonValue &value : barrages) {
+            const QJsonObject barrage = value.toObject();
+            const int seconds = barrage["seconds"].toInt(-1);
+            const QString text = barrage["text"].toString().trimmed();
+            if (seconds >= 0 && !text.isEmpty()) {
+                barragesBySecond[seconds].append(text.left(30));
+            }
+        }
+
+        emit barragesLoaded(barragesBySecond);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::sendBarrage(const QString &videoKey, int seconds, const QString &text)
+{
+    // 这是什么：描述一次 POST /videos/barrages 请求。
+    // 为什么能实现：发送弹幕只需要 videoKey、seconds、text 和用户信息，JSON POST 足够完成第一版联调。
+    // 什么时候调用：播放页确认弹幕文本非空且秒数合法后调用。
+    // 和谁配合：DataCenter 提供当前用户，mock server 保存弹幕并返回最终文本。
+    QNetworkRequest request(m_barragesUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    QJsonObject payload;
+    payload["videoKey"] = videoKey;
+    payload["seconds"] = seconds;
+    payload["text"] = text;
+    payload["userName"] = currentUser.userName;
+    payload["account"] = currentUser.account;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    QNetworkReply *reply = m_networkManager->post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理发送弹幕接口返回结果。
+        // 为什么能实现：mock/后端返回 success、seconds、text，成功后页面可以用这些值立即展示弹幕。
+        // 什么时候调用：Qt 事件循环收到 POST /videos/barrages 完成信号时自动调用。
+        // 和谁配合：PlayerPage 收到 barrageSendSucceeded 后显示弹幕并写入本地缓存。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit barrageRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit barrageRequestFailed(obj["message"].toString("弹幕发送失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        const int seconds = obj["seconds"].toInt(-1);
+        const QString text = obj["text"].toString().trimmed();
+        if (seconds < 0 || text.isEmpty()) {
+            emit barrageRequestFailed("弹幕响应缺少内容");
+            reply->deleteLater();
+            return;
+        }
+
+        emit barrageSendSucceeded(text, seconds);
+        reply->deleteLater();
+    });
+}

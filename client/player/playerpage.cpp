@@ -228,6 +228,7 @@ void PlayerPage::initUI(const QString &title,
         // 什么时候调用：GET /videos/play-url 成功返回时由 Qt 信号槽触发。
         // 和谁配合：ApiClient 负责请求地址，startPlayback() 负责统一设置 m_videoKey 并启动播放器。
         startPlayback(playUrl);
+        m_apiClient->fetchBarrages(m_videoKey);
     });
     connect(m_apiClient, &ApiClient::playUrlFailed, this, [this](const QString &message) {
         // 这是什么：播放地址接口失败后的本地回退。
@@ -236,6 +237,32 @@ void PlayerPage::initUI(const QString &title,
         // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
         LOG() << "播放地址接口请求失败，回退本地测试视频:" << message;
         startPlayback("D:/video-on-demand-client/test.mp4");
+        m_apiClient->fetchBarrages(m_videoKey);
+    });
+    connect(m_apiClient, &ApiClient::barragesLoaded, this, [this](const QHash<int, QStringList> &barragesBySecond) {
+        // 这是什么：播放页接收接口弹幕列表并写入本地缓存。
+        // 为什么能实现：ApiClient 已经按秒数整理好弹幕，DataCenter 可以直接用 videoKey 批量保存。
+        // 什么时候调用：GET /videos/barrages 成功后由 Qt 信号槽触发。
+        // 和谁配合：showBarragesAt() 后续按播放秒数从 DataCenter 读取并显示。
+        DataCenter::instance().setBarrages(m_videoKey, barragesBySecond);
+        m_triggeredBarrageSeconds.clear();
+    });
+    connect(m_apiClient, &ApiClient::barrageSendSucceeded, this, [this](const QString &text, int seconds) {
+        // 这是什么：发送弹幕成功后的页面收尾。
+        // 为什么能实现：接口已确认保存成功，页面可以立即显示并把同一条写入 DataCenter 本地缓存。
+        // 什么时候调用：POST /videos/barrages 成功后由 Qt 信号槽触发。
+        // 和谁配合：DataCenter 缓存弹幕，showBarrageText() 负责把文本飘过视频区域。
+        DataCenter::instance().addBarrage(m_videoKey, seconds, text);
+        if (m_isBarrageEnabled) {
+            showBarrageText(text, 0);
+            m_triggeredBarrageSeconds.insert(seconds);
+        }
+        if (m_barrageEdit) {
+            m_barrageEdit->clear();
+        }
+    });
+    connect(m_apiClient, &ApiClient::barrageRequestFailed, this, [](const QString &message) {
+        LOG() << "弹幕接口请求失败:" << message;
     });
     m_apiClient->fetchPlayUrl();
 
@@ -598,14 +625,11 @@ void PlayerPage::sendBarrage()
 
     const int upperBound = m_durationSeconds > 0 ? m_durationSeconds : m_currentPlaySeconds;
     const int second = qBound(0, m_currentPlaySeconds, upperBound);
-    DataCenter::instance().addBarrage(m_videoKey, second, text);
-
-    if (m_isBarrageEnabled) {
-        showBarrageText(text, 0);
-        m_triggeredBarrageSeconds.insert(second);
-    }
-
-    m_barrageEdit->clear();
+    // 这是什么：把发送弹幕从本地缓存改成接口提交。
+    // 为什么能实现：ApiClient::sendBarrage() 会把 videoKey、秒数、文本和用户信息 POST 到 mock/后端。
+    // 什么时候调用：用户输入非空弹幕并点击发送或按回车时调用。
+    // 和谁配合：barrageSendSucceeded 成功回调负责显示弹幕并写入 DataCenter。
+    m_apiClient->sendBarrage(m_videoKey, second, text);
 }
 
 void PlayerPage::showBarragesAt(int seconds)

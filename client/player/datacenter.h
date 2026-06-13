@@ -73,6 +73,7 @@ public:
     bool isLoggedIn() const;
 
     void addBarrage(const QString &videoKey, int seconds, const QString &text);
+    void setBarrages(const QString &videoKey, const QHash<int, QStringList> &barragesBySecond);
     QStringList barragesAt(const QString &videoKey, int seconds) const;
     void clearBarrages(const QString &videoKey);
 

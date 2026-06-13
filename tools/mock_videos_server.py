@@ -32,6 +32,13 @@ USERS = {
     },
 }
 
+BARRAGES = {
+    "D:/video-on-demand-client/test.mp4": {
+        1: ["欢迎来到测试视频"],
+        3: ["这条弹幕来自接口"],
+    },
+}
+
 
 class MockVideosHandler(BaseHTTPRequestHandler):
     def write_json(self, status, payload):
@@ -55,6 +62,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_play_url()
             return
 
+        if self.path == "/videos/barrages":
+            self.handle_get_barrages()
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -73,6 +84,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos":
             self.handle_upload_video(payload)
+            return
+
+        if self.path == "/videos/barrages":
+            self.handle_send_barrage(payload)
             return
 
         self.send_response(404)
@@ -124,6 +139,44 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         # 和谁配合：PlayerPage 收到 playUrl 后交给 MpvPlayer 播放，失败时回退本地路径。
         self.write_json(200, {"success": True, "playUrl": "D:/video-on-demand-client/test.mp4"})
 
+    def handle_get_barrages(self):
+        # 这是什么：处理第一版弹幕列表接口 GET /videos/barrages。
+        # 为什么能实现：mock server 用内存字典按 videoKey 和秒数保存弹幕，不依赖数据库。
+        # 什么时候调用：播放页拿到 m_videoKey 后，通过 ApiClient::fetchBarrages() 拉取弹幕时调用。
+        # 和谁配合：ApiClient 解析返回的 barrages，PlayerPage 按播放秒数触发显示。
+        video_key = "D:/video-on-demand-client/test.mp4"
+        items = []
+        for seconds, texts in BARRAGES.get(video_key, {}).items():
+            for text in texts:
+                items.append({"seconds": seconds, "text": text})
+
+        self.write_json(200, {"success": True, "barrages": items})
+
+    def handle_send_barrage(self, payload):
+        # 这是什么：处理第一版发送弹幕接口 POST /videos/barrages。
+        # 为什么能实现：从 JSON 里读取 videoKey、seconds、text，校验后追加到 BARRAGES 内存字典。
+        # 什么时候调用：用户在播放页输入弹幕并点击发送时调用。
+        # 和谁配合：ApiClient::sendBarrage() 发请求，PlayerPage 成功后立即展示并写入本地缓存。
+        video_key = str(payload.get("videoKey", "")).strip()
+        text = str(payload.get("text", "")).strip()
+        try:
+            seconds = int(payload.get("seconds", -1))
+        except (TypeError, ValueError):
+            seconds = -1
+
+        if not video_key:
+            self.write_json(200, {"success": False, "message": "视频标识不能为空"})
+            return
+        if seconds < 0:
+            self.write_json(200, {"success": False, "message": "弹幕时间非法"})
+            return
+        if not text:
+            self.write_json(200, {"success": False, "message": "弹幕内容不能为空"})
+            return
+
+        BARRAGES.setdefault(video_key, {}).setdefault(seconds, []).append(text[:30])
+        self.write_json(200, {"success": True, "message": "发送成功", "seconds": seconds, "text": text[:30]})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -131,5 +184,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at GET/POST http://127.0.0.1:8080/videos, GET /videos/play-url and POST /login")
+    print("Mock server running at videos/login/play-url/barrages mock endpoints")
     server.serve_forever()

@@ -65,6 +65,18 @@ public:
     // 和谁配合：PlayerPage 收到 playUrlLoaded 后调用 MpvPlayer::startPlay()。
     void fetchPlayUrl();
 
+    // 这是什么：请求当前视频的弹幕列表。
+    // 为什么能实现：mock/后端提供 GET /videos/barrages，返回每条弹幕的秒数和文本。
+    // 什么时候调用：播放页拿到 m_videoKey 并准备播放后调用。
+    // 和谁配合：PlayerPage 收到 barragesLoaded 后写入 DataCenter，并按播放时间显示。
+    void fetchBarrages(const QString &videoKey);
+
+    // 这是什么：发送当前视频的一条弹幕。
+    // 为什么能实现：把 videoKey、seconds、text 和当前用户信息组装成 JSON，POST 到 /videos/barrages。
+    // 什么时候调用：用户在播放页输入弹幕并点击发送或按回车时调用。
+    // 和谁配合：PlayerPage 负责输入校验和成功后的立即显示。
+    void sendBarrage(const QString &videoKey, int seconds, const QString &text);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -114,6 +126,24 @@ signals:
     // 和谁配合：PlayerPage 收到后回退到本地 test.mp4。
     void playUrlFailed(const QString &message);
 
+    // 这是什么：弹幕列表接口成功后的通知信号。
+    // 为什么能实现：ApiClient 把返回数组整理成 QHash<int, QStringList>，页面可直接按秒数缓存。
+    // 什么时候触发：fetchBarrages() 成功解析出弹幕列表后触发。
+    // 和谁配合：PlayerPage 写入 DataCenter，并由 showBarragesAt() 按播放进度显示。
+    void barragesLoaded(const QHash<int, QStringList> &barragesBySecond);
+
+    // 这是什么：发送弹幕成功后的通知信号。
+    // 为什么能实现：POST /videos/barrages 返回 success=true 后，ApiClient 把最终文本和秒数交回页面。
+    // 什么时候触发：sendBarrage() 收到成功响应后触发。
+    // 和谁配合：PlayerPage 立即显示这条弹幕，并写入 DataCenter 本地缓存。
+    void barrageSendSucceeded(const QString &text, int seconds);
+
+    // 这是什么：弹幕接口失败后的统一通知信号。
+    // 为什么能实现：拉取失败、发送失败、网络错误或响应异常都能转成 message。
+    // 什么时候触发：fetchBarrages() 或 sendBarrage() 无法完成时触发。
+    // 和谁配合：PlayerPage 记录日志或提示，但不影响播放控制。
+    void barrageRequestFailed(const QString &message);
+
 private:
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
@@ -138,6 +168,12 @@ private:
     // 什么时候使用：fetchPlayUrl() 创建 GET /videos/play-url 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 返回本地 test.mp4 路径。
     QUrl m_playUrlUrl = QUrl("http://127.0.0.1:8080/videos/play-url");
+
+    // 这是什么：当前弹幕接口地址。
+    // 为什么这样做：第一版沿用固定路径，GET 拉取弹幕，POST 发送弹幕。
+    // 什么时候使用：fetchBarrages() 和 sendBarrage() 创建请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 的 /videos/barrages 内存接口。
+    QUrl m_barragesUrl = QUrl("http://127.0.0.1:8080/videos/barrages");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

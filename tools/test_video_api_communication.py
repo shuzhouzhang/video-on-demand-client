@@ -53,6 +53,38 @@ def main():
 
         print("OK: /videos/play-url communication test passed")
 
+        with urllib.request.urlopen("http://127.0.0.1:8080/videos/barrages", timeout=3) as response:
+            barrage_body = response.read().decode("utf-8")
+            barrage_list = json.loads(barrage_body)
+
+        assert barrage_list["success"] is True, "barrages request should succeed"
+        assert isinstance(barrage_list["barrages"], list), "barrages should be a JSON array"
+
+        barrage_send_success = post_json(
+            "http://127.0.0.1:8080/videos/barrages",
+            {
+                "videoKey": "D:/video-on-demand-client/test.mp4",
+                "seconds": 5,
+                "text": "测试发送弹幕",
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+            },
+        )
+        assert barrage_send_success["success"] is True, "barrage send should succeed"
+        assert barrage_send_success["text"] == "测试发送弹幕", "barrage send should echo text"
+
+        barrage_send_empty = post_json(
+            "http://127.0.0.1:8080/videos/barrages",
+            {
+                "videoKey": "D:/video-on-demand-client/test.mp4",
+                "seconds": 5,
+                "text": "",
+            },
+        )
+        assert barrage_send_empty["success"] is False, "empty barrage should fail"
+
+        print("OK: /videos/barrages communication test passed")
+
         login_success = post_json(
             "http://127.0.0.1:8080/login",
             {"account": "bit-user-001", "password": "bit123456"},

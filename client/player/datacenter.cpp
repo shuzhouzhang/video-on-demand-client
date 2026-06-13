@@ -153,6 +153,19 @@ void DataCenter::addBarrage(const QString &videoKey, int seconds, const QString 
     m_barragesByVideo[videoKey][seconds].append(trimmedText.left(30));
 }
 
+void DataCenter::setBarrages(const QString &videoKey, const QHash<int, QStringList> &barragesBySecond)
+{
+    // 这是什么：批量保存某个视频的弹幕列表。
+    // 为什么能实现：接口已把弹幕整理成“秒数 -> 文本列表”，这里直接替换该 videoKey 的本地缓存。
+    // 什么时候调用：播放页通过 ApiClient 拉取弹幕后，收到 barragesLoaded 信号时调用。
+    // 和谁配合：barragesAt() 按播放秒数读取缓存，showBarragesAt() 负责把文本飘到视频区域上。
+    if (videoKey.isEmpty()) {
+        return;
+    }
+
+    m_barragesByVideo[videoKey] = barragesBySecond;
+}
+
 QStringList DataCenter::barragesAt(const QString &videoKey, int seconds) const
 {
     if (videoKey.isEmpty() || seconds < 0) {
