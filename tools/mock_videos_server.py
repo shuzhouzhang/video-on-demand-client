@@ -47,12 +47,16 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path != "/videos":
-            self.send_response(404)
-            self.end_headers()
+        if self.path == "/videos":
+            self.write_json(200, VIDEOS)
             return
 
-        self.write_json(200, VIDEOS)
+        if self.path == "/videos/play-url":
+            self.handle_play_url()
+            return
+
+        self.send_response(404)
+        self.end_headers()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -113,6 +117,13 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         self.write_json(200, {"success": True, "message": "发布成功"})
 
+    def handle_play_url(self):
+        # 这是什么：处理最小版播放地址接口 GET /videos/play-url。
+        # 为什么能实现：第一版不区分视频 id，固定返回本地 test.mp4 路径即可验证“播放页从接口拿地址”。
+        # 什么时候调用：Qt 播放页打开后通过 ApiClient::fetchPlayUrl() 请求播放地址时调用。
+        # 和谁配合：PlayerPage 收到 playUrl 后交给 MpvPlayer 播放，失败时回退本地路径。
+        self.write_json(200, {"success": True, "playUrl": "D:/video-on-demand-client/test.mp4"})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -120,5 +131,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at GET/POST http://127.0.0.1:8080/videos and POST http://127.0.0.1:8080/login")
+    print("Mock server running at GET/POST http://127.0.0.1:8080/videos, GET /videos/play-url and POST /login")
     server.serve_forever()

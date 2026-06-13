@@ -1,6 +1,7 @@
 // playerpage.cpp 实现视频播放页的静态 UI 和基础交互。
 // 播放页已接入 libmpv，负责播放控制、时间同步和视频信息展示。
 #include "playerpage.h"
+#include "apiclient.h"
 #include "bulletscreenitem.h"
 #include "datacenter.h"
 #include "ui_playerpage.h"
@@ -126,6 +127,7 @@ void PlayerPage::initUI(const QString &title,
     ui->videoDesc->setText("简介：这是一条视频简介占位内容，后续接入真实视频数据后会展示作者填写的视频说明。");
 
     m_mpvPlayer = new MpvPlayer(ui->videoScreen, this);
+    m_apiClient = new ApiClient(this);
 
     initSpeedMenu();
     initVolumePanel();
@@ -220,9 +222,23 @@ void PlayerPage::initUI(const QString &title,
         updateTimeLabel(m_durationSeconds);
     });
 
-    m_videoKey = "D:/video-on-demand-client/test.mp4";
-    m_mpvPlayer->startPlay(m_videoKey);
-    m_mpvPlayer->pause();
+    connect(m_apiClient, &ApiClient::playUrlLoaded, this, [this](const QString &playUrl) {
+        // 这是什么：播放页拿到接口返回的播放地址后启动 mpv。
+        // 为什么能实现：ApiClient 已确认 playUrl 非空，MpvPlayer::startPlay() 可以直接加载本地路径或后续网络地址。
+        // 什么时候调用：GET /videos/play-url 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：ApiClient 负责请求地址，startPlayback() 负责统一设置 m_videoKey 并启动播放器。
+        startPlayback(playUrl);
+    });
+    connect(m_apiClient, &ApiClient::playUrlFailed, this, [this](const QString &message) {
+        // 这是什么：播放地址接口失败后的本地回退。
+        // 为什么能实现：当前阶段仍保留 test.mp4，本地路径可保证 mock server 关闭时播放页不至于空白。
+        // 什么时候调用：网络错误、接口返回失败或 playUrl 为空时触发。
+        // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
+        LOG() << "播放地址接口请求失败，回退本地测试视频:" << message;
+        startPlayback("D:/video-on-demand-client/test.mp4");
+    });
+    m_apiClient->fetchPlayUrl();
+
     m_mpvPlayer->setVolume(m_volume);
     m_mpvPlayer->setPlaySpeed(m_playSpeed);
 }
@@ -645,6 +661,22 @@ QFrame *PlayerPage::barrageTrackForIndex(int index) const
     default:
         return m_barrageTrackBottom;
     }
+}
+
+void PlayerPage::startPlayback(const QString &playUrl)
+{
+    // 这是什么：用指定播放地址启动 mpv，并保持进入播放页后默认暂停。
+    // 为什么能实现：MpvPlayer 已经绑定到 videoScreen，startPlay() 加载地址后 pause() 可以停在初始状态。
+    // 什么时候调用：播放地址接口成功返回，或接口失败需要回退本地 test.mp4 时调用。
+    // 和谁配合：ApiClient 提供 playUrl，MpvPlayer 负责实际播放，弹幕用 m_videoKey 区分视频。
+    const QString trimmedPlayUrl = playUrl.trimmed();
+    if (trimmedPlayUrl.isEmpty()) {
+        return;
+    }
+
+    m_videoKey = trimmedPlayUrl;
+    m_mpvPlayer->startPlay(m_videoKey);
+    m_mpvPlayer->pause();
 }
 
 QString PlayerPage::formatSeconds(int seconds)

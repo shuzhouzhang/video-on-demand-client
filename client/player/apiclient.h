@@ -59,6 +59,12 @@ public:
     // 和谁配合：UploadVideoPage 收集表单并响应 uploadSucceeded/uploadFailed 信号。
     void uploadVideo(const UploadVideoInfo &info);
 
+    // 这是什么：请求最小版视频播放地址接口。
+    // 为什么能实现：mock/后端提供 GET /videos/play-url，返回 JSON 里的 playUrl 字段给播放器使用。
+    // 什么时候调用：播放页初始化 mpv 后，需要拿到真实播放地址时调用。
+    // 和谁配合：PlayerPage 收到 playUrlLoaded 后调用 MpvPlayer::startPlay()。
+    void fetchPlayUrl();
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -96,6 +102,18 @@ signals:
     // 和谁配合：UploadVideoPage 收到后恢复发布按钮并提示错误原因。
     void uploadFailed(const QString &message);
 
+    // 这是什么：播放地址接口成功后的通知信号。
+    // 为什么能实现：GET /videos/play-url 返回 success=true 和 playUrl 后，ApiClient 可以把地址交给播放页。
+    // 什么时候触发：fetchPlayUrl() 收到非空 playUrl 后触发。
+    // 和谁配合：PlayerPage 用 playUrl 启动 MpvPlayer 播放。
+    void playUrlLoaded(const QString &playUrl);
+
+    // 这是什么：播放地址接口失败后的通知信号。
+    // 为什么能实现：网络错误、JSON 异常、success=false 或 playUrl 为空都会转成失败消息。
+    // 什么时候触发：fetchPlayUrl() 无法拿到可播放地址时触发。
+    // 和谁配合：PlayerPage 收到后回退到本地 test.mp4。
+    void playUrlFailed(const QString &message);
+
 private:
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
@@ -114,6 +132,12 @@ private:
     // 什么时候使用：uploadVideo() 创建 POST /videos 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 处理同路径的上传请求。
     QUrl m_uploadVideoUrl = QUrl("http://127.0.0.1:8080/videos");
+
+    // 这是什么：当前最小版播放地址接口地址。
+    // 为什么这样做：先不引入 videoId，固定接口能最快验证播放页从网络拿播放地址。
+    // 什么时候使用：fetchPlayUrl() 创建 GET /videos/play-url 请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 返回本地 test.mp4 路径。
+    QUrl m_playUrlUrl = QUrl("http://127.0.0.1:8080/videos/play-url");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

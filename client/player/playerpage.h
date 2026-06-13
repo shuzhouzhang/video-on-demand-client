@@ -18,6 +18,7 @@ class QMenu;
 class QPushButton;
 class QShowEvent;
 class QSlider;
+class ApiClient;
 
 namespace Ui {
 class PlayerPage;
@@ -69,6 +70,7 @@ private:
     void showBarragesAt(int seconds);
     void showBarrageText(const QString &text, int trackIndex = -1);
     QFrame *barrageTrackForIndex(int index) const;
+    void startPlayback(const QString &playUrl);
     static QString formatSeconds(int seconds);
 
 private:
@@ -89,6 +91,7 @@ private:
     QWidget *m_volumePanel = nullptr;
     QSlider *m_volumeSlider = nullptr;
     QLabel *m_volumeValueLabel = nullptr;
+    ApiClient *m_apiClient = nullptr;
     MpvPlayer *m_mpvPlayer = nullptr;
     bool m_isBarrageEnabled = true;
     QSet<int> m_triggeredBarrageSeconds;

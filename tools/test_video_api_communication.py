@@ -44,6 +44,15 @@ def main():
 
         print("OK: /videos communication test passed")
 
+        with urllib.request.urlopen("http://127.0.0.1:8080/videos/play-url", timeout=3) as response:
+            play_url_body = response.read().decode("utf-8")
+            play_url = json.loads(play_url_body)
+
+        assert play_url["success"] is True, "play-url should succeed"
+        assert play_url["playUrl"], "play-url should return non-empty playUrl"
+
+        print("OK: /videos/play-url communication test passed")
+
         login_success = post_json(
             "http://127.0.0.1:8080/login",
             {"account": "bit-user-001", "password": "bit123456"},

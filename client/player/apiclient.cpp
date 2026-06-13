@@ -167,3 +167,44 @@ void ApiClient::uploadVideo(const UploadVideoInfo &info)
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchPlayUrl()
+{
+    // 这是什么：描述一次 GET /videos/play-url 请求。
+    // 为什么能实现：QNetworkRequest 保存播放地址接口 URL，QNetworkAccessManager 负责异步发送 GET。
+    // 什么时候调用：PlayerPage 初始化播放器后，需要从接口获取播放地址时调用。
+    // 和谁配合：m_playUrlUrl 指向 mock server 或真实后端的播放地址接口。
+    QNetworkRequest request(m_playUrlUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    // 这是什么：真正发起播放地址请求。
+    // 为什么能实现：get() 立即返回 QNetworkReply，接口响应稍后通过 finished 信号到达。
+    // 什么时候调用：request 准备好后立刻调用。
+    // 和谁配合：下面的 finished 槽函数读取 JSON 并发出 playUrlLoaded/playUrlFailed。
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理播放地址接口返回结果。
+        // 为什么能实现：finished 触发时 reply 中已有网络状态和响应体，可以统一解析 success/playUrl。
+        // 什么时候调用：Qt 事件循环收到 GET /videos/play-url 完成信号时自动调用。
+        // 和谁配合：成功交给 PlayerPage 播放，失败让 PlayerPage 回退本地 test.mp4。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit playUrlFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        const bool success = obj["success"].toBool(false);
+        const QString playUrl = obj["playUrl"].toString().trimmed();
+        if (!success || playUrl.isEmpty()) {
+            const QString message = obj["message"].toString("播放地址为空");
+            emit playUrlFailed(message);
+            reply->deleteLater();
+            return;
+        }
+
+        emit playUrlLoaded(playUrl);
+        reply->deleteLater();
+    });
+}
