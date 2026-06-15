@@ -1,9 +1,11 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from urllib.parse import parse_qs, urlparse
 
 
 VIDEOS = [
     {
+        "id": "video-001",
         "title": "Mock 接口返回的视频",
         "userName": "Mock 用户",
         "date": "6-9",
@@ -12,8 +14,10 @@ VIDEOS = [
         "likeCount": "256",
         "category": "科技",
         "tags": ["编程开发", "软件工具"],
+        "description": "这条视频来自 mock server，用来验证播放页能通过 videoId 拉取详情。",
     },
     {
+        "id": "video-002",
         "title": "Mock 美食探店视频",
         "userName": "接口测试员",
         "date": "6-9",
@@ -22,6 +26,7 @@ VIDEOS = [
         "likeCount": "88",
         "category": "美食",
         "tags": ["美食测评", "探店"],
+        "description": "一条用于测试分类、标签和详情展示的美食探店视频。",
     },
 ]
 
@@ -54,16 +59,23 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/videos":
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+
+        if path == "/videos":
             self.write_json(200, VIDEOS)
             return
 
-        if self.path == "/videos/play-url":
+        if path == "/videos/play-url":
             self.handle_play_url()
             return
 
-        if self.path == "/videos/barrages":
+        if path == "/videos/barrages":
             self.handle_get_barrages()
+            return
+
+        if path == "/videos/detail":
+            self.handle_video_detail(parsed_url.query)
             return
 
         self.send_response(404)
@@ -152,6 +164,23 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         self.write_json(200, {"success": True, "barrages": items})
 
+    def handle_video_detail(self, query):
+        # 这是什么：处理第一版视频详情接口 GET /videos/detail?id=...。
+        # 为什么能实现：mock server 的 VIDEOS 已经保存了 id 和详情字段，按 id 查到后直接包装成 JSON 返回。
+        # 什么时候调用：Qt 播放页打开后通过 ApiClient::fetchVideoDetail() 请求当前视频详情时调用。
+        # 和谁配合：VideoBox 把 videoId 传给 PlayerPage，PlayerPage 请求详情后刷新标题、作者、播放量和简介。
+        video_id = parse_qs(query).get("id", [""])[0].strip()
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+
+        for video in VIDEOS:
+            if video.get("id") == video_id:
+                self.write_json(200, {"success": True, "video": video})
+                return
+
+        self.write_json(200, {"success": False, "message": "视频不存在"})
+
     def handle_send_barrage(self, payload):
         # 这是什么：处理第一版发送弹幕接口 POST /videos/barrages。
         # 为什么能实现：从 JSON 里读取 videoKey、seconds、text，校验后追加到 BARRAGES 内存字典。
@@ -184,5 +213,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages mock endpoints")
+    print("Mock server running at videos/login/play-url/barrages/detail mock endpoints")
     server.serve_forever()

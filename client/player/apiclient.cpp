@@ -6,6 +6,34 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
+
+namespace {
+VideoInfo videoInfoFromJsonObject(const QJsonObject &obj)
+{
+    // 这是什么：把单个视频 JSON 对象转换成 VideoInfo。
+    // 为什么能实现：详情接口和列表接口使用同一组字段，按字段名读取后即可交给页面使用。
+    // 什么时候调用：fetchVideoDetail() 收到 success=true 的 video 对象后调用。
+    // 和谁配合：ApiClient 负责解析 JSON，PlayerPage 负责把 VideoInfo 应用到播放页 UI。
+    VideoInfo video;
+    video.id = obj["id"].toString();
+    video.title = obj["title"].toString();
+    video.userName = obj["userName"].toString();
+    video.date = obj["date"].toString();
+    video.duration = obj["duration"].toString();
+    video.playCount = obj["playCount"].toString();
+    video.likeCount = obj["likeCount"].toString();
+    video.category = obj["category"].toString();
+    video.description = obj["description"].toString();
+
+    const QJsonArray tagArray = obj["tags"].toArray();
+    for (const QJsonValue &tagValue : tagArray) {
+        video.tags.append(tagValue.toString());
+    }
+
+    return video;
+}
+}
 
 ApiClient::ApiClient(QObject *parent)
     : QObject(parent)
@@ -302,6 +330,58 @@ void ApiClient::sendBarrage(const QString &videoKey, int seconds, const QString 
         }
 
         emit barrageSendSucceeded(text, seconds);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::fetchVideoDetail(const QString &videoId)
+{
+    // 这是什么：准备一次 GET /videos/detail?id=... 请求。
+    // 为什么能实现：QUrlQuery 会把 videoId 安全放进 URL query，mock/后端可据此查找对应视频详情。
+    // 什么时候调用：播放页打开并拿到首页卡片传来的 videoId 后调用。
+    // 和谁配合：m_videoDetailUrl 指向详情接口，下面的 finished 回调负责把响应转成 VideoInfo。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit videoDetailFailed("视频 id 不能为空");
+        return;
+    }
+
+    QUrl url = m_videoDetailUrl;
+    QUrlQuery query;
+    query.addQueryItem("id", trimmedVideoId);
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理视频详情接口返回结果。
+        // 为什么能实现：finished 触发时 reply 已包含网络状态和响应体，可以统一判断错误、解析 success/video 字段。
+        // 什么时候调用：Qt 事件循环收到 GET /videos/detail 完成信号时自动调用。
+        // 和谁配合：成功发 videoDetailLoaded 给 PlayerPage，失败发 videoDetailFailed 让播放页保留兜底信息。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit videoDetailFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit videoDetailFailed(obj["message"].toString("视频详情加载失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        const VideoInfo video = videoInfoFromJsonObject(obj["video"].toObject());
+        if (video.title.isEmpty()) {
+            emit videoDetailFailed("视频详情响应缺少标题");
+            reply->deleteLater();
+            return;
+        }
+
+        emit videoDetailLoaded(video);
         reply->deleteLater();
     });
 }

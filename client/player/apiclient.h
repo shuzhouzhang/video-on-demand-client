@@ -77,6 +77,12 @@ public:
     // 和谁配合：PlayerPage 负责输入校验和成功后的立即显示。
     void sendBarrage(const QString &videoKey, int seconds, const QString &text);
 
+    // 这是什么：请求某个视频的详情信息。
+    // 为什么能实现：播放页已经从首页卡片拿到 videoId，ApiClient 可以把它作为 query 参数请求 /videos/detail。
+    // 什么时候调用：PlayerPage 打开后，需要用后端/mock 的最新详情刷新标题、作者、播放量和简介时调用。
+    // 和谁配合：PlayerPage 收到 videoDetailLoaded 后更新播放页文字，失败时继续使用卡片传入的兜底信息。
+    void fetchVideoDetail(const QString &videoId);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -144,6 +150,18 @@ signals:
     // 和谁配合：PlayerPage 记录日志或提示，但不影响播放控制。
     void barrageRequestFailed(const QString &message);
 
+    // 这是什么：视频详情接口成功后的通知信号。
+    // 为什么能实现：ApiClient 把 /videos/detail 返回的 JSON 翻译成 VideoInfo，页面可直接按字段更新 UI。
+    // 什么时候触发：fetchVideoDetail() 成功拿到 success=true 且视频标题非空的响应后触发。
+    // 和谁配合：PlayerPage 连接这个信号，刷新标题、作者、日期、播放量、点赞数和简介。
+    void videoDetailLoaded(const VideoInfo &video);
+
+    // 这是什么：视频详情接口失败后的通知信号。
+    // 为什么能实现：网络错误、缺少 videoId、找不到视频或响应格式异常都会统一转成 message。
+    // 什么时候触发：fetchVideoDetail() 无法拿到有效详情时触发。
+    // 和谁配合：PlayerPage 记录日志，并继续显示首页卡片传入的兜底信息。
+    void videoDetailFailed(const QString &message);
+
 private:
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
@@ -174,6 +192,12 @@ private:
     // 什么时候使用：fetchBarrages() 和 sendBarrage() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 的 /videos/barrages 内存接口。
     QUrl m_barragesUrl = QUrl("http://127.0.0.1:8080/videos/barrages");
+
+    // 这是什么：当前视频详情接口地址。
+    // 为什么这样做：第一版用固定 /videos/detail 路径配合 id query，后续接真实后端时容易升级为按视频 id 查详情。
+    // 什么时候使用：fetchVideoDetail() 创建 GET /videos/detail?id=... 请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 根据 id 返回 mock 视频详情。
+    QUrl m_videoDetailUrl = QUrl("http://127.0.0.1:8080/videos/detail");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

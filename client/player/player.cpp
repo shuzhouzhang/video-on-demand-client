@@ -315,7 +315,8 @@ void player::renderHomeVideos()
         }
 
         auto *videoBox = new VideoBox(ui->videoScrollContents);
-        videoBox->setVideoInfo(video.title,
+        videoBox->setVideoInfo(video.id,
+                               video.title,
                                video.userName,
                                video.date,
                                video.duration,
@@ -325,13 +326,14 @@ void player::renderHomeVideos()
         connect(videoBox,
                 &VideoBox::videoClicked,
                 this,
-                [](const QString &title,
+                [](const QString &videoId,
+                   const QString &title,
                    const QString &userName,
                    const QString &date,
                    const QString &duration,
                    const QString &playCount,
                    const QString &likeCount) {
-                    auto *playerPage = new PlayerPage(title, userName, date, duration, playCount, likeCount);
+                    auto *playerPage = new PlayerPage(videoId, title, userName, date, duration, playCount, likeCount);
                     playerPage->setAttribute(Qt::WA_DeleteOnClose);
                     playerPage->show();
                 });

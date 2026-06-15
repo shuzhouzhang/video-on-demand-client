@@ -8,6 +8,7 @@
 #include <QStringList>
 
 struct VideoInfo {
+    QString id;
     QString title;
     QString userName;
     QString date;
@@ -16,6 +17,7 @@ struct VideoInfo {
     QString likeCount;
     QString category;
     QStringList tags;
+    QString description;
 };
 
 // 这是什么：当前登录用户的轻量信息。

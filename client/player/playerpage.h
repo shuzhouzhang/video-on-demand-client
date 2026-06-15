@@ -19,6 +19,7 @@ class QPushButton;
 class QShowEvent;
 class QSlider;
 class ApiClient;
+struct VideoInfo;
 
 namespace Ui {
 class PlayerPage;
@@ -29,7 +30,8 @@ class PlayerPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit PlayerPage(const QString &title,
+    explicit PlayerPage(const QString &videoId,
+                        const QString &title,
                         const QString &userName,
                         const QString &date,
                         const QString &duration,
@@ -46,7 +48,8 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
-    void initUI(const QString &title,
+    void initUI(const QString &videoId,
+                const QString &title,
                 const QString &userName,
                 const QString &date,
                 const QString &duration,
@@ -71,6 +74,7 @@ private:
     void showBarrageText(const QString &text, int trackIndex = -1);
     QFrame *barrageTrackForIndex(int index) const;
     void startPlayback(const QString &playUrl);
+    void applyVideoDetail(const VideoInfo &video);
     static QString formatSeconds(int seconds);
 
 private:
@@ -85,6 +89,7 @@ private:
     int m_currentPlaySeconds = 0;
     int m_nextBarrageTrack = 0;
     QPoint m_dragOffset;
+    QString m_videoId;
     QString m_title;
     QString m_videoKey;
     QMenu *m_speedMenu = nullptr;

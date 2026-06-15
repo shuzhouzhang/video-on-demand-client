@@ -22,13 +22,15 @@ VideoBox::~VideoBox()
     delete ui;
 }
 
-void VideoBox::setVideoInfo(const QString &title,
+void VideoBox::setVideoInfo(const QString &id,
+                            const QString &title,
                             const QString &userName,
                             const QString &date,
                             const QString &duration,
                             const QString &playCount,
                             const QString &likeCount)
 {
+    m_id = id;
     m_title = title;
     m_userName = userName;
     m_date = date;
@@ -51,7 +53,7 @@ bool VideoBox::eventFilter(QObject *watched, QEvent *event)
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
             LOG() << "点击视频卡片:" << m_title;
-            emit videoClicked(m_title, m_userName, m_date, m_duration, m_playCount, m_likeCount);
+            emit videoClicked(m_id, m_title, m_userName, m_date, m_duration, m_playCount, m_likeCount);
             return true;
         }
     }

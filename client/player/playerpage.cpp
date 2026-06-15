@@ -26,7 +26,8 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
-PlayerPage::PlayerPage(const QString &title,
+PlayerPage::PlayerPage(const QString &videoId,
+                       const QString &title,
                        const QString &userName,
                        const QString &date,
                        const QString &duration,
@@ -36,7 +37,7 @@ PlayerPage::PlayerPage(const QString &title,
     : QWidget(parent)
     , ui(new Ui::PlayerPage)
 {
-    initUI(title, userName, date, duration, playCount, likeCount);
+    initUI(videoId, title, userName, date, duration, playCount, likeCount);
 }
 
 PlayerPage::~PlayerPage()
@@ -102,7 +103,8 @@ void PlayerPage::hideEvent(QHideEvent *event)
     QWidget::hideEvent(event);
 }
 
-void PlayerPage::initUI(const QString &title,
+void PlayerPage::initUI(const QString &videoId,
+                        const QString &title,
                         const QString &userName,
                         const QString &date,
                         const QString &duration,
@@ -111,6 +113,7 @@ void PlayerPage::initUI(const QString &title,
 {
     ui->setupUi(this);
 
+    m_videoId = videoId;
     m_title = title;
     setFixedSize(1450, 860);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
@@ -264,6 +267,20 @@ void PlayerPage::initUI(const QString &title,
     connect(m_apiClient, &ApiClient::barrageRequestFailed, this, [](const QString &message) {
         LOG() << "弹幕接口请求失败:" << message;
     });
+    connect(m_apiClient, &ApiClient::videoDetailLoaded, this, [this](const VideoInfo &video) {
+        // 这是什么：播放页收到视频详情接口后的 UI 刷新。
+        // 为什么能实现：ApiClient 已经把 JSON 转成 VideoInfo，页面只需要把字段填到现有控件。
+        // 什么时候调用：GET /videos/detail?id=... 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：VideoBox 提供 videoId，ApiClient 请求详情，applyVideoDetail() 负责统一更新页面文字。
+        applyVideoDetail(video);
+    });
+    connect(m_apiClient, &ApiClient::videoDetailFailed, this, [](const QString &message) {
+        LOG() << "视频详情接口请求失败，保留卡片传入的信息:" << message;
+    });
+
+    if (!m_videoId.isEmpty()) {
+        m_apiClient->fetchVideoDetail(m_videoId);
+    }
     m_apiClient->fetchPlayUrl();
 
     m_mpvPlayer->setVolume(m_volume);
@@ -701,6 +718,30 @@ void PlayerPage::startPlayback(const QString &playUrl)
     m_videoKey = trimmedPlayUrl;
     m_mpvPlayer->startPlay(m_videoKey);
     m_mpvPlayer->pause();
+}
+
+void PlayerPage::applyVideoDetail(const VideoInfo &video)
+{
+    // 这是什么：把详情接口返回的视频信息应用到播放页。
+    // 为什么能实现：VideoInfo 字段和播放页标题、作者、日期、播放量、点赞数、简介控件一一对应。
+    // 什么时候调用：ApiClient::videoDetailLoaded 信号触发后调用。
+    // 和谁配合：详情接口负责给最新数据，播放页保留原有播放、弹幕和进度逻辑不变。
+    if (!video.id.isEmpty()) {
+        m_videoId = video.id;
+    }
+    if (!video.title.isEmpty()) {
+        m_title = video.title;
+        setWindowTitle(video.title);
+        ui->videoTitle->setText(video.title);
+    }
+
+    ui->userName->setText(video.userName);
+    ui->uploadDate->setText(video.date);
+    ui->playNum->setText(video.playCount);
+    ui->likeNum->setText(video.likeCount);
+    if (!video.description.trimmed().isEmpty()) {
+        ui->videoDesc->setText(QStringLiteral("简介：") + video.description.trimmed());
+    }
 }
 
 QString PlayerPage::formatSeconds(int seconds)
