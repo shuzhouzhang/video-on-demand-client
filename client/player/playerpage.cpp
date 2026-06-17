@@ -161,9 +161,20 @@ void PlayerPage::initUI(const QString &videoId,
     });
 
     connect(ui->likeBtn, &QPushButton::clicked, this, [this]() {
-        m_isLiked = !m_isLiked;
-        updateLikeButton();
-        LOG() << "播放页切换点赞状态:" << m_title << (m_isLiked ? "已点赞" : "取消点赞");
+        // 这是什么：把播放页点赞按钮从本地切换改成接口提交。
+        // 为什么能实现：PlayerPage 已保存 m_videoId，ApiClient 可以把 videoId/account POST 给 mock/后端。
+        // 什么时候调用：用户点击播放页点赞按钮时调用。
+        // 和谁配合：videoLikeChanged 成功回调负责真正更新 m_isLiked、按钮样式和点赞数。
+        if (m_videoId.isEmpty()) {
+            LOG() << "点赞失败：视频 id 为空";
+            return;
+        }
+
+        if (m_isLiked) {
+            m_apiClient->unlikeVideo(m_videoId);
+        } else {
+            m_apiClient->likeVideo(m_videoId);
+        }
     });
 
     connect(ui->speedBtn, &QPushButton::clicked, this, [this]() {
@@ -276,6 +287,19 @@ void PlayerPage::initUI(const QString &videoId,
     });
     connect(m_apiClient, &ApiClient::videoDetailFailed, this, [](const QString &message) {
         LOG() << "视频详情接口请求失败，保留卡片传入的信息:" << message;
+    });
+    connect(m_apiClient, &ApiClient::videoLikeChanged, this, [this](bool liked, const QString &likeCount) {
+        // 这是什么：点赞/取消点赞接口成功后的页面收尾。
+        // 为什么能实现：接口返回的是最终 liked 和 likeCount，页面直接按最终结果刷新即可。
+        // 什么时候调用：POST /videos/like 或 /videos/unlike 成功后由 Qt 信号槽触发。
+        // 和谁配合：ApiClient 负责网络请求，updateLikeButton() 负责把状态画到按钮上。
+        m_isLiked = liked;
+        ui->likeNum->setText(likeCount);
+        updateLikeButton();
+        LOG() << "播放页点赞状态已同步:" << m_title << (m_isLiked ? "已点赞" : "未点赞") << likeCount;
+    });
+    connect(m_apiClient, &ApiClient::videoLikeFailed, this, [](const QString &message) {
+        LOG() << "点赞接口请求失败，保留当前点赞状态:" << message;
     });
 
     if (!m_videoId.isEmpty()) {

@@ -44,6 +44,8 @@ BARRAGES = {
     },
 }
 
+VIDEO_LIKES = {}
+
 
 class MockVideosHandler(BaseHTTPRequestHandler):
     def write_json(self, status, payload):
@@ -100,6 +102,14 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos/barrages":
             self.handle_send_barrage(payload)
+            return
+
+        if self.path == "/videos/like":
+            self.handle_video_like(payload, True)
+            return
+
+        if self.path == "/videos/unlike":
+            self.handle_video_like(payload, False)
             return
 
         self.send_response(404)
@@ -206,6 +216,40 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         BARRAGES.setdefault(video_key, {}).setdefault(seconds, []).append(text[:30])
         self.write_json(200, {"success": True, "message": "发送成功", "seconds": seconds, "text": text[:30]})
 
+    def handle_video_like(self, payload, should_like):
+        # 这是什么：处理第一版点赞/取消点赞接口。
+        # 为什么能实现：mock server 用 VIDEO_LIKES 在内存里记录“某个账号是否点赞了某个 videoId”。
+        # 什么时候调用：Qt 播放页点击点赞按钮，通过 ApiClient::likeVideo()/unlikeVideo() 发送请求时调用。
+        # 和谁配合：PlayerPage 根据返回的 liked 和 likeCount 更新按钮状态和点赞数。
+        video_id = str(payload.get("videoId", "")).strip()
+        account = str(payload.get("account", "")).strip() or "guest"
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+
+        video = next((item for item in VIDEOS if item.get("id") == video_id), None)
+        if video is None:
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+
+        liked_accounts = VIDEO_LIKES.setdefault(video_id, set())
+        was_liked = account in liked_accounts
+        if should_like and not was_liked:
+            liked_accounts.add(account)
+            video["likeCount"] = str(int(video.get("likeCount", "0")) + 1)
+        elif not should_like and was_liked:
+            liked_accounts.remove(account)
+            video["likeCount"] = str(max(0, int(video.get("likeCount", "0")) - 1))
+
+        self.write_json(
+            200,
+            {
+                "success": True,
+                "liked": account in liked_accounts,
+                "likeCount": video["likeCount"],
+            },
+        )
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -213,5 +257,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages/detail mock endpoints")
+    print("Mock server running at videos/login/play-url/barrages/detail/like mock endpoints")
     server.serve_forever()

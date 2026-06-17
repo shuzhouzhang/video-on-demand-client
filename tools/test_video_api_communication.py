@@ -62,6 +62,38 @@ def main():
 
         print("OK: /videos/detail communication test passed")
 
+        like_success = post_json(
+            f"{base_url}/videos/like",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert like_success["success"] is True, "like should succeed with valid videoId"
+        assert like_success["liked"] is True, "like should mark video as liked"
+        assert like_success["likeCount"] == "257", "like should increase like count once"
+
+        like_repeat = post_json(
+            f"{base_url}/videos/like",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert like_repeat["success"] is True, "repeat like should still succeed"
+        assert like_repeat["liked"] is True, "repeat like should keep liked state"
+        assert like_repeat["likeCount"] == "257", "repeat like should not increase count again"
+
+        unlike_success = post_json(
+            f"{base_url}/videos/unlike",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert unlike_success["success"] is True, "unlike should succeed after like"
+        assert unlike_success["liked"] is False, "unlike should mark video as not liked"
+        assert unlike_success["likeCount"] == "256", "unlike should decrease like count once"
+
+        like_missing_video_id = post_json(
+            f"{base_url}/videos/like",
+            {"videoId": "", "account": "bit-user-001"},
+        )
+        assert like_missing_video_id["success"] is False, "like should fail without videoId"
+
+        print("OK: /videos like communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

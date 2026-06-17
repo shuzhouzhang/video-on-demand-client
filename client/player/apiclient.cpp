@@ -385,3 +385,75 @@ void ApiClient::fetchVideoDetail(const QString &videoId)
         reply->deleteLater();
     });
 }
+
+void ApiClient::likeVideo(const QString &videoId)
+{
+    // 这是什么：对外提供“点赞当前视频”的接口。
+    // 为什么能实现：点赞请求和取消点赞请求共用 JSON 结构，这里只需要选择 /videos/like 地址。
+    // 什么时候调用：播放页点赞按钮处于未点赞状态时调用。
+    // 和谁配合：sendVideoLikeRequest() 发请求，PlayerPage 接收 videoLikeChanged 后更新 UI。
+    sendVideoLikeRequest(m_likeUrl, videoId);
+}
+
+void ApiClient::unlikeVideo(const QString &videoId)
+{
+    // 这是什么：对外提供“取消点赞当前视频”的接口。
+    // 为什么能实现：mock/后端用 videoId/account 找到点赞关系并删除，返回最终 liked=false。
+    // 什么时候调用：播放页点赞按钮处于已点赞状态时调用。
+    // 和谁配合：sendVideoLikeRequest() 发请求，PlayerPage 接收 videoLikeChanged 后更新 UI。
+    sendVideoLikeRequest(m_unlikeUrl, videoId);
+}
+
+void ApiClient::sendVideoLikeRequest(const QUrl &url, const QString &videoId)
+{
+    // 这是什么：构造并发送点赞/取消点赞 POST 请求。
+    // 为什么能实现：两个接口都只需要 videoId 和 account，QNetworkAccessManager::post() 可以异步发送 JSON。
+    // 什么时候调用：likeVideo() 或 unlikeVideo() 选择好接口地址后调用。
+    // 和谁配合：DataCenter 提供当前账号，mock/后端返回 liked/likeCount，播放页根据结果更新显示。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit videoLikeFailed("视频 id 不能为空");
+        return;
+    }
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    QJsonObject payload;
+    payload["videoId"] = trimmedVideoId;
+    payload["account"] = currentUser.account;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    QNetworkReply *reply = m_networkManager->post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理点赞/取消点赞接口返回结果。
+        // 为什么能实现：finished 触发时 reply 已有完整响应体，可以统一解析 success、liked 和 likeCount。
+        // 什么时候调用：Qt 事件循环收到 POST /videos/like 或 /videos/unlike 完成信号时自动调用。
+        // 和谁配合：成功发 videoLikeChanged 给 PlayerPage，失败发 videoLikeFailed 保持页面原状态。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit videoLikeFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit videoLikeFailed(obj["message"].toString("点赞请求失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        const bool liked = obj["liked"].toBool(false);
+        const QString likeCount = obj["likeCount"].toString();
+        if (likeCount.isEmpty()) {
+            emit videoLikeFailed("点赞响应缺少点赞数");
+            reply->deleteLater();
+            return;
+        }
+
+        emit videoLikeChanged(liked, likeCount);
+        reply->deleteLater();
+    });
+}
