@@ -45,6 +45,7 @@ BARRAGES = {
 }
 
 VIDEO_LIKES = {}
+WATCH_PROGRESS = {}
 
 
 class MockVideosHandler(BaseHTTPRequestHandler):
@@ -80,6 +81,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_video_detail(parsed_url.query)
             return
 
+        if path == "/videos/watch-progress":
+            self.handle_get_watch_progress(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -110,6 +115,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos/unlike":
             self.handle_video_like(payload, False)
+            return
+
+        if self.path == "/videos/watch-progress":
+            self.handle_save_watch_progress(payload)
             return
 
         self.send_response(404)
@@ -250,6 +259,43 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def handle_get_watch_progress(self, query):
+        # 这是什么：处理第一版读取播放记录接口 GET /videos/watch-progress。
+        # 为什么能实现：mock server 用 WATCH_PROGRESS 按 account + videoId 保存秒数，读取时没有记录就返回 0。
+        # 什么时候调用：Qt 播放页打开后，通过 ApiClient::fetchWatchProgress() 查询上次看到哪里时调用。
+        # 和谁配合：PlayerPage 收到 seconds 后，在 mpv 加载播放地址后 seek 到对应位置。
+        params = parse_qs(query)
+        video_id = params.get("videoId", [""])[0].strip()
+        account = params.get("account", [""])[0].strip() or "guest"
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+
+        seconds = WATCH_PROGRESS.get((account, video_id), 0)
+        self.write_json(200, {"success": True, "seconds": seconds, "message": "读取成功"})
+
+    def handle_save_watch_progress(self, payload):
+        # 这是什么：处理第一版保存播放记录接口 POST /videos/watch-progress。
+        # 为什么能实现：从 JSON 读取 videoId/account/seconds，校验后写入 WATCH_PROGRESS 内存字典。
+        # 什么时候调用：播放页定时保存、暂停或关闭时，通过 ApiClient::saveWatchProgress() 提交进度。
+        # 和谁配合：下次 handle_get_watch_progress() 读取同一个 account + videoId 的秒数。
+        video_id = str(payload.get("videoId", "")).strip()
+        account = str(payload.get("account", "")).strip() or "guest"
+        try:
+            seconds = int(payload.get("seconds", -1))
+        except (TypeError, ValueError):
+            seconds = -1
+
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+        if seconds < 0:
+            self.write_json(200, {"success": False, "message": "播放秒数非法"})
+            return
+
+        WATCH_PROGRESS[(account, video_id)] = seconds
+        self.write_json(200, {"success": True, "seconds": seconds, "message": "保存成功"})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -257,5 +303,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages/detail/like mock endpoints")
+    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress mock endpoints")
     server.serve_forever()

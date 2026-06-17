@@ -95,6 +95,18 @@ public:
     // 和谁配合：PlayerPage 收到 videoLikeChanged 后恢复按钮状态并更新点赞数。
     void unlikeVideo(const QString &videoId);
 
+    // 这是什么：请求当前视频的上次播放进度。
+    // 为什么能实现：播放页已经持有 videoId，ApiClient 可带上当前账号请求 /videos/watch-progress。
+    // 什么时候调用：PlayerPage 打开后，需要知道是否要从上次看到的位置继续播放时调用。
+    // 和谁配合：PlayerPage 收到 watchProgressLoaded 后，在 mpv 准备好时 seek 到对应秒数。
+    void fetchWatchProgress(const QString &videoId);
+
+    // 这是什么：保存当前视频的播放进度。
+    // 为什么能实现：PlayerPage 持续维护当前播放秒数，ApiClient 把 videoId/account/seconds POST 给后端。
+    // 什么时候调用：播放过程中定时保存，或播放页关闭/隐藏时保存一次。
+    // 和谁配合：mock/后端保存记录，下次 fetchWatchProgress() 再读回来。
+    void saveWatchProgress(const QString &videoId, int seconds);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -186,6 +198,24 @@ signals:
     // 和谁配合：PlayerPage 记录日志，并保留当前点赞状态不变。
     void videoLikeFailed(const QString &message);
 
+    // 这是什么：播放记录加载成功后的通知信号。
+    // 为什么能实现：/videos/watch-progress 返回 seconds，ApiClient 解析后可把整数秒交给播放页。
+    // 什么时候触发：fetchWatchProgress() 成功拿到有效 seconds 后触发。
+    // 和谁配合：PlayerPage 缓存这个秒数，并在播放地址加载完成后调用 mpv seek。
+    void watchProgressLoaded(int seconds);
+
+    // 这是什么：播放记录保存成功后的通知信号。
+    // 为什么能实现：POST /videos/watch-progress 返回 success=true 时说明 mock/后端已保存。
+    // 什么时候触发：saveWatchProgress() 成功提交当前秒数后触发。
+    // 和谁配合：PlayerPage 目前只记录日志，不打断播放。
+    void watchProgressSaved();
+
+    // 这是什么：播放记录接口失败后的通知信号。
+    // 为什么能实现：网络错误、缺少 videoId 或秒数非法都会统一转成 message。
+    // 什么时候触发：加载或保存播放记录失败时触发。
+    // 和谁配合：PlayerPage 记录日志，并继续正常播放。
+    void watchProgressFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -240,6 +270,12 @@ private:
     // 什么时候使用：unlikeVideo() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 在内存中移除用户点赞状态。
     QUrl m_unlikeUrl = QUrl("http://127.0.0.1:8080/videos/unlike");
+
+    // 这是什么：当前播放记录接口地址。
+    // 为什么这样做：第一版 GET/POST 共用 /videos/watch-progress，分别负责读取和保存进度。
+    // 什么时候使用：fetchWatchProgress() 和 saveWatchProgress() 创建请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 用内存保存 account + videoId 对应的秒数。
+    QUrl m_watchProgressUrl = QUrl("http://127.0.0.1:8080/videos/watch-progress");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

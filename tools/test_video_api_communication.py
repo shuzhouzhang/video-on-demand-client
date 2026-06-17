@@ -94,6 +94,41 @@ def main():
 
         print("OK: /videos like communication test passed")
 
+        with urllib.request.urlopen(
+            f"{base_url}/videos/watch-progress?videoId=video-001&account=bit-user-001",
+            timeout=3,
+        ) as response:
+            first_progress_body = response.read().decode("utf-8")
+            first_progress = json.loads(first_progress_body)
+
+        assert first_progress["success"] is True, "watch progress should load"
+        assert first_progress["seconds"] == 0, "first watch progress should default to zero"
+
+        save_progress = post_json(
+            f"{base_url}/videos/watch-progress",
+            {"videoId": "video-001", "account": "bit-user-001", "seconds": 12},
+        )
+        assert save_progress["success"] is True, "watch progress should save"
+        assert save_progress["seconds"] == 12, "watch progress should echo saved seconds"
+
+        with urllib.request.urlopen(
+            f"{base_url}/videos/watch-progress?videoId=video-001&account=bit-user-001",
+            timeout=3,
+        ) as response:
+            saved_progress_body = response.read().decode("utf-8")
+            saved_progress = json.loads(saved_progress_body)
+
+        assert saved_progress["success"] is True, "saved watch progress should load"
+        assert saved_progress["seconds"] == 12, "saved watch progress should be returned"
+
+        missing_progress = post_json(
+            f"{base_url}/videos/watch-progress",
+            {"videoId": "", "account": "bit-user-001", "seconds": 12},
+        )
+        assert missing_progress["success"] is False, "watch progress should fail without videoId"
+
+        print("OK: /videos/watch-progress communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

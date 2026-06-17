@@ -18,6 +18,7 @@ class QMenu;
 class QPushButton;
 class QShowEvent;
 class QSlider;
+class QTimer;
 class ApiClient;
 struct VideoInfo;
 
@@ -75,6 +76,8 @@ private:
     QFrame *barrageTrackForIndex(int index) const;
     void startPlayback(const QString &playUrl);
     void applyVideoDetail(const VideoInfo &video);
+    void applyPendingWatchProgress();
+    void submitWatchProgress();
     static QString formatSeconds(int seconds);
 
 private:
@@ -87,6 +90,7 @@ private:
     int m_volume = 60;
     int m_durationSeconds = 0;
     int m_currentPlaySeconds = 0;
+    int m_pendingSeekSeconds = -1;
     int m_nextBarrageTrack = 0;
     QPoint m_dragOffset;
     QString m_videoId;
@@ -98,6 +102,7 @@ private:
     QLabel *m_volumeValueLabel = nullptr;
     ApiClient *m_apiClient = nullptr;
     MpvPlayer *m_mpvPlayer = nullptr;
+    QTimer *m_watchProgressTimer = nullptr;
     bool m_isBarrageEnabled = true;
     QSet<int> m_triggeredBarrageSeconds;
     QWidget *m_barrageLayer = nullptr;

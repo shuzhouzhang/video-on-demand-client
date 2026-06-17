@@ -457,3 +457,101 @@ void ApiClient::sendVideoLikeRequest(const QUrl &url, const QString &videoId)
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchWatchProgress(const QString &videoId)
+{
+    // 这是什么：准备一次 GET /videos/watch-progress 请求。
+    // 为什么能实现：QUrlQuery 把 videoId/account 放进 URL，mock/后端据此查到当前用户对当前视频的进度。
+    // 什么时候调用：播放页打开后，想恢复上次观看位置时调用。
+    // 和谁配合：PlayerPage 收到 watchProgressLoaded 后，在 mpv 加载视频后跳转到该秒数。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit watchProgressFailed("视频 id 不能为空");
+        return;
+    }
+
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    QUrl url = m_watchProgressUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    query.addQueryItem("account", currentUser.account);
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理播放记录读取接口返回结果。
+        // 为什么能实现：finished 触发时 reply 已包含完整响应体，可以统一解析 success 和 seconds。
+        // 什么时候调用：Qt 事件循环收到 GET /videos/watch-progress 完成信号时自动调用。
+        // 和谁配合：成功发 watchProgressLoaded 给 PlayerPage，失败发 watchProgressFailed 但不影响播放。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit watchProgressFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit watchProgressFailed(obj["message"].toString("播放记录加载失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        emit watchProgressLoaded(qMax(0, obj["seconds"].toInt(0)));
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::saveWatchProgress(const QString &videoId, int seconds)
+{
+    // 这是什么：提交当前视频播放进度。
+    // 为什么能实现：播放页已经知道当前播放秒数，POST JSON 即可让 mock/后端按用户和视频保存。
+    // 什么时候调用：播放页定时保存，或者窗口隐藏/关闭时保存。
+    // 和谁配合：fetchWatchProgress() 下次读取同一份 account + videoId 记录。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit watchProgressFailed("视频 id 不能为空");
+        return;
+    }
+    if (seconds < 0) {
+        emit watchProgressFailed("播放秒数非法");
+        return;
+    }
+
+    QNetworkRequest request(m_watchProgressUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    QJsonObject payload;
+    payload["videoId"] = trimmedVideoId;
+    payload["account"] = currentUser.account;
+    payload["seconds"] = seconds;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    QNetworkReply *reply = m_networkManager->post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理播放记录保存接口返回结果。
+        // 为什么能实现：mock/后端返回 success/message，成功说明当前秒数已经写入内存记录。
+        // 什么时候调用：Qt 事件循环收到 POST /videos/watch-progress 完成信号时自动调用。
+        // 和谁配合：PlayerPage 只记录保存结果，播放控制不等待这个接口。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit watchProgressFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray data = reply->readAll();
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (!obj["success"].toBool(false)) {
+            emit watchProgressFailed(obj["message"].toString("播放记录保存失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        emit watchProgressSaved();
+        reply->deleteLater();
+    });
+}
