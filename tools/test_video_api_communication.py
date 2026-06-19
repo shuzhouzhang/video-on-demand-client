@@ -576,6 +576,19 @@ def main():
 
         print("OK: email login communication test passed")
 
+        logout_success = post_json(
+            f"{base_url}/logout",
+            {"account": "bit-user-001"},
+        )
+        assert logout_success["success"] is True, "logout should succeed with account"
+        logout_missing_account = post_json(
+            f"{base_url}/logout",
+            {"account": ""},
+        )
+        assert logout_missing_account["success"] is False, "logout should fail without account"
+
+        print("OK: /logout communication test passed")
+
         upload_success = post_json(
             f"{base_url}/videos",
             {

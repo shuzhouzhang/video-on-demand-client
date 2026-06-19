@@ -67,6 +67,12 @@ public:
     // 和谁配合：复用 loginSucceeded/loginFailed，让 Login 后续流程保持一致。
     void emailLogin(const QString &email, const QString &authcodeId, const QString &authcode);
 
+    // 这是什么：通知后端当前账号退出登录。
+    // 为什么能实现：POST account 后，后端可清理真实系统中的会话；mock 返回确认结果。
+    // 什么时候调用：已登录用户在设置入口确认退出时调用。
+    // 和谁配合：logoutSucceeded 后 player.cpp 清空 DataCenter 和页面状态。
+    void logout();
+
     // 这是什么：请求真实视频文件上传接口。
     // 为什么能实现：把 UploadVideoInfo 拆成 JSON metadata、videoFile 和可选 coverFile multipart 部分。
     // 什么时候调用：上传页表单校验通过，并确认当前用户已登录后调用。
@@ -242,6 +248,11 @@ signals:
     // 什么时候触发：requestEmailCode() 失败时触发。
     // 和谁配合：Login 恢复“获取验证码”按钮并提示原因。
     void emailCodeFailed(const QString &message);
+
+    // 这是什么：退出登录成功/失败通知；为什么能实现：POST 响应提供 success/message。
+    // 什么时候触发：logout() 完成后；和谁配合：player.cpp 清空状态或提示错误。
+    void logoutSucceeded();
+    void logoutFailed(const QString &message);
 
     // 这是什么：上传视频元数据成功后的通知信号。
     // 为什么能实现：POST /videos 返回 success=true 时，ApiClient 可以把 message 交回上传页。
@@ -470,6 +481,9 @@ private:
     QUrl m_loginUrl = QUrl("http://127.0.0.1:8080/login");
     QUrl m_emailCodeUrl = QUrl("http://127.0.0.1:8080/login/email-code");
     QUrl m_emailLoginUrl = QUrl("http://127.0.0.1:8080/login/email");
+    // 这是什么：退出登录接口地址；为什么这样做：将会话结束表达为明确 POST 动作。
+    // 什么时候使用：logout() 创建请求时；和谁配合：mock/真实后端会话管理。
+    QUrl m_logoutUrl = QUrl("http://127.0.0.1:8080/logout");
 
     // 这是什么：当前上传视频元数据接口地址。
     // 为什么这样做：第一版沿用 REST 风格，GET /videos 获取列表，POST /videos 发布新视频元数据。

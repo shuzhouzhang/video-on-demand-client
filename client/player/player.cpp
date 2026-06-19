@@ -636,6 +636,27 @@ void player::initUI()
         QMessageBox::warning(this, QStringLiteral("修改头像"), message);
         LOG() << "头像上传失败:" << message;
     });
+    connect(m_apiClient, &ApiClient::logoutSucceeded, this, [this, setMyAvatar]() {
+        // 这是什么：退出接口成功后的客户端状态清理。
+        // 为什么能实现：清空 DataCenter 后，所有依赖 account 的业务都会恢复未登录判断。
+        // 什么时候调用：POST /logout 返回 success=true 时调用。
+        // 和谁配合：主窗口恢复游客文字、默认头像和空作品区域。
+        DataCenter::instance().clearCurrentUser();
+        ui->myNickNameLabel->setText(QStringLiteral("点击登录"));
+        ui->myAccountLabel->setText(QStringLiteral("游客模式"));
+        ui->myDescLabel->setText(QStringLiteral("登录后可以修改资料、上传视频和查看个人内容"));
+        ui->myWorksCountLabel->setText(QStringLiteral("0"));
+        ui->myWorksTitleLabel->setText(QStringLiteral("我的作品"));
+        ui->myWorksEmptyLabel->setText(QStringLiteral("暂无作品"));
+        ui->myWorksEmptyLabel->show();
+        clearLayout(m_myVideoGridLayout);
+        setMyAvatar(QPixmap(":/images/myself/defaultAvatar.png"));
+        LOG() << "已退出登录并恢复游客页面";
+    });
+    connect(m_apiClient, &ApiClient::logoutFailed, this, [this](const QString &message) {
+        QMessageBox::warning(this, QStringLiteral("退出登录"), message);
+        LOG() << "退出登录失败:" << message;
+    });
     connect(m_profileDialog, &ProfileDialog::saveRequested, this, [this](const QString &userName,
                                                                          const QString &description) {
         // 这是什么：资料窗口提交表单后的接口入口。
@@ -792,7 +813,14 @@ void player::initUI()
             return;
         }
 
-        LOG() << "点击设置入口，当前阶段暂不打开设置页";
+        const auto choice = QMessageBox::question(this,
+                                                   QStringLiteral("账号设置"),
+                                                   QStringLiteral("确定退出当前账号吗？"),
+                                                   QMessageBox::Yes | QMessageBox::No,
+                                                   QMessageBox::No);
+        if (choice == QMessageBox::Yes) {
+            m_apiClient->logout();
+        }
     });
 
     resize(1450, 860);

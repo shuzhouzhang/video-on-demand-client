@@ -119,6 +119,12 @@ public:
     // 和谁配合：player.cpp 用它决定是打开登录窗口还是继续执行当前操作。
     bool isLoggedIn() const;
 
+    // 这是什么：清空当前登录用户内存状态。
+    // 为什么能实现：UserInfo 重置为空后，isLoggedIn() 会立即返回 false。
+    // 什么时候调用：退出登录接口成功后调用。
+    // 和谁配合：player.cpp 恢复游客页面，各业务接口停止携带旧账号。
+    void clearCurrentUser();
+
     void addBarrage(const QString &videoKey, int seconds, const QString &text);
     void setBarrages(const QString &videoKey, const QHash<int, QStringList> &barragesBySecond);
     QStringList barragesAt(const QString &videoKey, int seconds) const;

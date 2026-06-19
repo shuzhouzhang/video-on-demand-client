@@ -222,6 +222,35 @@ void ApiClient::emailLogin(const QString &email,
     });
 }
 
+void ApiClient::logout()
+{
+    // 这是什么：提交当前账号退出登录请求。
+    // 为什么能实现：DataCenter 提供账号，后端确认会话退出后通过信号通知页面。
+    // 什么时候调用：设置入口确认退出后调用。
+    // 和谁配合：player.cpp 只在 logoutSucceeded 后清空本地状态。
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (user.account.isEmpty()) {
+        emit logoutFailed("当前没有登录用户");
+        return;
+    }
+    QNetworkRequest request(m_logoutUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["account"] = user.account;
+    QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
+            emit logoutFailed(reply->error() == QNetworkReply::NoError
+                                  ? obj["message"].toString("退出登录失败")
+                                  : reply->errorString());
+        } else {
+            emit logoutSucceeded();
+        }
+        reply->deleteLater();
+    });
+}
+
 void ApiClient::uploadVideo(const UploadVideoInfo &info)
 {
     // 这是什么：使用 multipart/form-data 上传视频元数据和真实文件。

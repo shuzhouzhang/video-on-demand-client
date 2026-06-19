@@ -159,6 +159,15 @@ bool DataCenter::isLoggedIn() const
     return !m_currentUser.account.isEmpty();
 }
 
+void DataCenter::clearCurrentUser()
+{
+    // 这是什么：删除当前进程中的登录用户信息。
+    // 为什么能实现：用默认构造 UserInfo 覆盖昵称、账号、简介和头像路径。
+    // 什么时候调用：ApiClient::logoutSucceeded 后调用。
+    // 和谁配合：player 主窗口随后恢复游客 UI。
+    m_currentUser = UserInfo{};
+}
+
 void DataCenter::addBarrage(const QString &videoKey, int seconds, const QString &text)
 {
     const QString trimmedText = text.trimmed();

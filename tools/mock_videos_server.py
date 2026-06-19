@@ -191,6 +191,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         if self.path == "/login/email":
             self.handle_email_login(payload)
             return
+        if self.path == "/logout":
+            account = str(payload.get("account", "")).strip()
+            self.write_json(200, {"success": bool(account), "message": "退出成功" if account else "账号不能为空"})
+            return
 
         if self.path == "/videos":
             self.handle_upload_video(payload)
