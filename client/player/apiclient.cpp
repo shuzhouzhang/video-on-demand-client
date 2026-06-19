@@ -47,6 +47,7 @@ UserInfo userInfoFromJsonObject(const QJsonObject &obj)
     user.account = obj["account"].toString();
     user.userName = obj["userName"].toString();
     user.description = obj["description"].toString();
+    user.avatarPath = obj["avatarPath"].toString();
     return user;
 }
 }
@@ -1194,6 +1195,62 @@ void ApiClient::fetchMyVideos()
             }
         }
         emit myVideosLoaded(videos);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::uploadAvatar(const QString &filePath)
+{
+    // 这是什么：使用 multipart 上传当前用户头像。
+    // 为什么能实现：账号表单字段定位用户，avatarFile 部分承载真实图片字节。
+    // 什么时候调用：用户选择不超过 5MB 的有效图片后调用。
+    // 和谁配合：mock 保存文件并更新 USERS，avatarUploaded 把路径交回 player.cpp。
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (user.account.isEmpty()) {
+        emit avatarUploadFailed("请先登录后修改头像");
+        return;
+    }
+    auto *avatarFile = new QFile(filePath);
+    if (!avatarFile->open(QIODevice::ReadOnly)) {
+        emit avatarUploadFailed("头像文件无法读取");
+        delete avatarFile;
+        return;
+    }
+
+    auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+    QHttpPart accountPart;
+    accountPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                          QVariant("form-data; name=\"account\""));
+    accountPart.setBody(user.account.toUtf8());
+    multiPart->append(accountPart);
+
+    QHttpPart avatarPart;
+    avatarPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                         QVariant(QString("form-data; name=\"avatarFile\"; filename=\"%1\"")
+                                      .arg(QFileInfo(filePath).fileName())));
+    avatarPart.setBodyDevice(avatarFile);
+    avatarFile->setParent(multiPart);
+    multiPart->append(avatarPart);
+
+    QNetworkReply *reply = m_networkManager->post(QNetworkRequest(m_avatarUploadUrl), multiPart);
+    multiPart->setParent(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理头像上传响应。
+        // 为什么能实现：后端 success=true 时同时返回可供客户端读取的 avatarPath。
+        // 什么时候调用：POST /users/avatar 完成后由 Qt 自动调用。
+        // 和谁配合：player.cpp 使用 avatarUploaded 更新共享状态和 UI。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit avatarUploadFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString avatarPath = obj["avatarPath"].toString();
+        if (!obj["success"].toBool(false) || avatarPath.isEmpty()) {
+            emit avatarUploadFailed(obj["message"].toString("头像上传失败"));
+        } else {
+            emit avatarUploaded(avatarPath);
+        }
         reply->deleteLater();
     });
 }

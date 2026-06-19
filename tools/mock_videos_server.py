@@ -153,6 +153,9 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         if self.path == "/videos/upload":
             self.handle_upload_video_files()
             return
+        if self.path == "/users/avatar":
+            self.handle_upload_avatar()
+            return
 
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length).decode("utf-8")
@@ -708,6 +711,7 @@ class MockVideosHandler(BaseHTTPRequestHandler):
                     "account": account,
                     "userName": user["userName"],
                     "description": user.get("description", ""),
+                    "avatarPath": user.get("avatarPath", ""),
                 },
             },
         )
@@ -741,9 +745,50 @@ class MockVideosHandler(BaseHTTPRequestHandler):
                     "account": account,
                     "userName": user_name,
                     "description": description,
+                    "avatarPath": user.get("avatarPath", ""),
                 },
             },
         )
+
+    def handle_upload_avatar(self):
+        # 这是什么：处理用户头像 multipart 文件上传。
+        # 为什么能实现：按表单字段读取 account 和 avatarFile，保存后把路径写回 USERS。
+        # 什么时候调用：Qt “我的”页面通过 ApiClient::uploadAvatar() 上传头像时调用。
+        # 和谁配合：个人资料 GET 返回 avatarPath，客户端下次登录可以恢复头像。
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self.write_json(200, {"success": False, "message": "头像上传格式错误"})
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 5 * 1024 * 1024 + 64 * 1024:
+            self.write_json(200, {"success": False, "message": "头像大小不能超过 5MB"})
+            return
+        message = BytesParser(policy=default).parsebytes(
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+            + self.rfile.read(length)
+        )
+        account = ""
+        avatar_name = ""
+        avatar_content = b""
+        for part in message.iter_parts():
+            field_name = part.get_param("name", header="content-disposition")
+            if field_name == "account":
+                account = (part.get_payload(decode=True) or b"").decode("utf-8").strip()
+            elif field_name == "avatarFile":
+                avatar_name = Path(part.get_filename() or "").name
+                avatar_content = part.get_payload(decode=True) or b""
+        if account not in USERS:
+            self.write_json(200, {"success": False, "message": "用户不存在"})
+            return
+        if Path(avatar_name).suffix.lower() not in {".png", ".jpg", ".jpeg"} or not avatar_content:
+            self.write_json(200, {"success": False, "message": "请选择 PNG 或 JPG 头像"})
+            return
+        avatar_dir = UPLOAD_DIR / "avatars"
+        avatar_dir.mkdir(parents=True, exist_ok=True)
+        avatar_path = avatar_dir / f"{account.replace('@', '_at_')}-{avatar_name}"
+        avatar_path.write_bytes(avatar_content)
+        USERS[account]["avatarPath"] = str(avatar_path)
+        self.write_json(200, {"success": True, "message": "头像上传成功", "avatarPath": str(avatar_path)})
 
     def handle_get_user_videos(self, query):
         # 这是什么：返回当前账号发布的视频列表。

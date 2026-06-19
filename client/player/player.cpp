@@ -571,12 +571,18 @@ void player::initUI()
         ui->myWorksEmptyLabel->show();
         LOG() << "我的收藏加载失败:" << message;
     });
-    connect(m_apiClient, &ApiClient::userProfileLoaded, this, [this](const UserInfo &user) {
+    connect(m_apiClient, &ApiClient::userProfileLoaded, this, [this, setMyAvatar](const UserInfo &user) {
         // 这是什么：登录后读取资料成功的处理。
         // 为什么能实现：applyUserProfile() 同时更新 DataCenter 和页面，避免保存两份不一致状态。
         // 什么时候调用：GET /users/profile 成功时调用。
         // 和谁配合：ApiClient 负责网络和解析，本函数负责界面数据落地。
         applyUserProfile(user);
+        if (!user.avatarPath.isEmpty()) {
+            const QPixmap avatar(user.avatarPath);
+            if (!avatar.isNull()) {
+                setMyAvatar(avatar);
+            }
+        }
         LOG() << "个人资料加载成功:" << user.account;
     });
     connect(m_apiClient, &ApiClient::userProfileUpdated, this, [this](const UserInfo &user) {
@@ -609,6 +615,26 @@ void player::initUI()
         ui->myWorksEmptyLabel->setText(message);
         ui->myWorksEmptyLabel->show();
         LOG() << "我的视频加载失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::avatarUploaded, this, [this, setMyAvatar](const QString &avatarPath) {
+        // 这是什么：头像文件上传成功后的状态和界面同步。
+        // 为什么能实现：后端返回保存路径，QPixmap 可读取同一台机器 mock 保存的图片。
+        // 什么时候调用：POST /users/avatar 成功后调用。
+        // 和谁配合：DataCenter 保存 avatarPath，个人资料接口后续可再次恢复头像。
+        const QPixmap avatar(avatarPath);
+        if (avatar.isNull()) {
+            QMessageBox::warning(this, QStringLiteral("修改头像"), QStringLiteral("上传成功，但头像文件无法读取"));
+            return;
+        }
+        UserInfo user = DataCenter::instance().currentUser();
+        user.avatarPath = avatarPath;
+        DataCenter::instance().setCurrentUser(user);
+        setMyAvatar(avatar);
+        LOG() << "头像上传并更新成功:" << avatarPath;
+    });
+    connect(m_apiClient, &ApiClient::avatarUploadFailed, this, [this](const QString &message) {
+        QMessageBox::warning(this, QStringLiteral("修改头像"), message);
+        LOG() << "头像上传失败:" << message;
     });
     connect(m_profileDialog, &ProfileDialog::saveRequested, this, [this](const QString &userName,
                                                                          const QString &description) {
@@ -708,8 +734,8 @@ void player::initUI()
             return;
         }
 
-        setMyAvatar(avatar);
-        LOG() << "本地头像预览已更新:" << fileName;
+        m_apiClient->uploadAvatar(fileName);
+        LOG() << "开始上传头像:" << fileName;
     });
     connect(ui->editProfileBtn, &QPushButton::clicked, this, [this]() {
         if (!DataCenter::instance().isLoggedIn()) {

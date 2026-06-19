@@ -65,6 +65,22 @@ def post_multipart(url, metadata, video_content, cover_content=b""):
         return json.loads(response.read().decode("utf-8"))
 
 
+def post_avatar_multipart(url, account, avatar_content, filename="avatar.png"):
+    boundary = f"----codex-avatar-{uuid.uuid4().hex}"
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"account\"\r\n\r\n{account}\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"avatarFile\"; filename=\"{filename}\"\r\n\r\n"
+    ).encode("utf-8") + avatar_content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=3) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def main():
     # 这是什么：一个最小通信测试；为什么这样做：不用启动 Qt 界面也能验证 /videos 能通。
     # 什么时候调用：改 ApiClient 或 mock server 后运行；和谁配合：ApiClient 请求同一个 URL。
@@ -374,6 +390,31 @@ def main():
             },
         )
         assert restored_profile["success"] is True, "profile fixture should restore for later login tests"
+
+        avatar_upload = post_avatar_multipart(
+            f"{base_url}/users/avatar",
+            "bit-user-001",
+            b"fake-avatar-png-bytes",
+        )
+        assert avatar_upload["success"] is True, "avatar upload should succeed"
+        avatar_path = Path(avatar_upload["avatarPath"])
+        assert avatar_path.read_bytes() == b"fake-avatar-png-bytes", "server should save avatar bytes"
+
+        with urllib.request.urlopen(
+            f"{base_url}/users/profile?account=bit-user-001",
+            timeout=3,
+        ) as response:
+            profile_with_avatar = json.loads(response.read().decode("utf-8"))
+        assert profile_with_avatar["user"]["avatarPath"] == str(avatar_path), "profile should return avatar path"
+
+        invalid_avatar = post_avatar_multipart(
+            f"{base_url}/users/avatar",
+            "bit-user-001",
+            b"not-an-image",
+            filename="avatar.txt",
+        )
+        assert invalid_avatar["success"] is False, "unsupported avatar extension should fail"
+        avatar_path.unlink(missing_ok=True)
 
         print("OK: /users/profile communication test passed")
 

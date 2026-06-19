@@ -28,6 +28,7 @@ struct UserInfo {
     QString userName;
     QString account;
     QString description;
+    QString avatarPath;
 };
 
 // 这是什么：一条视频评论在客户端中的结构化数据。

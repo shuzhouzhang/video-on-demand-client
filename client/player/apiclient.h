@@ -187,6 +187,12 @@ public:
     // 和谁配合：myVideosLoaded 把标准 VideoInfo 列表交给 player.cpp 渲染。
     void fetchMyVideos();
 
+    // 这是什么：上传当前用户选择的真实头像文件。
+    // 为什么能实现：multipart 同时发送账号和图片二进制，后端保存后返回 avatarPath。
+    // 什么时候调用：“我的”页面选择并校验头像图片后调用。
+    // 和谁配合：avatarUploaded 更新 DataCenter 和头像按钮，个人资料接口负责后续恢复。
+    void uploadAvatar(const QString &filePath);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -404,6 +410,18 @@ signals:
     // 和谁配合：player.cpp 在作品区域展示错误但不影响其它页面。
     void myVideosFailed(const QString &message);
 
+    // 这是什么：头像文件上传成功后的通知。
+    // 为什么能实现：后端返回实际保存路径，客户端可以立即读取并显示。
+    // 什么时候触发：POST /users/avatar 成功后触发。
+    // 和谁配合：player.cpp 更新 UserInfo.avatarPath 和头像按钮。
+    void avatarUploaded(const QString &avatarPath);
+
+    // 这是什么：头像上传失败后的通知。
+    // 为什么能实现：本地文件错误、网络错误和后端校验错误统一转成 message。
+    // 什么时候触发：uploadAvatar() 无法完成时触发。
+    // 和谁配合：player.cpp 提示错误并保留原头像。
+    void avatarUploadFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -517,6 +535,7 @@ private:
     // 什么时候使用：fetchMyVideos() 创建请求时使用。
     // 和谁配合：mock server 根据 ownerAccount 返回 VIDEOS 子集。
     QUrl m_myVideosUrl = QUrl("http://127.0.0.1:8080/users/videos");
+    QUrl m_avatarUploadUrl = QUrl("http://127.0.0.1:8080/users/avatar");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

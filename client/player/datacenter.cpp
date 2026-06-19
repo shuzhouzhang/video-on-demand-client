@@ -125,6 +125,8 @@ void DataCenter::setCurrentUser(const QString &userName, const QString &account)
     // 和谁配合：currentUser() 和 isLoggedIn() 后续都基于这份状态返回结果。
     m_currentUser.userName = userName.trimmed();
     m_currentUser.account = account.trimmed();
+    m_currentUser.description.clear();
+    m_currentUser.avatarPath.clear();
 }
 
 void DataCenter::setCurrentUser(const UserInfo &user)
@@ -136,6 +138,7 @@ void DataCenter::setCurrentUser(const UserInfo &user)
     m_currentUser.userName = user.userName.trimmed();
     m_currentUser.account = user.account.trimmed();
     m_currentUser.description = user.description.trimmed();
+    m_currentUser.avatarPath = user.avatarPath.trimmed();
 }
 
 UserInfo DataCenter::currentUser() const
