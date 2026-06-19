@@ -1,6 +1,6 @@
-// adminwidget.cpp implements the first static version of the admin console.
-// Current actions only write logs; real review and role APIs can be connected later.
+// adminwidget.cpp implements the review and role-management API console.
 #include "adminwidget.h"
+#include "apiclient.h"
 #include "ui_adminwidget.h"
 #include "util.h"
 
@@ -9,6 +9,9 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
+#include <QInputDialog>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QStyle>
@@ -54,6 +57,7 @@ AdminWidget::~AdminWidget()
 void AdminWidget::initUI()
 {
     ui->setupUi(this);
+    m_apiClient = new ApiClient(this);
 
     ui->checkStatusCombo->addItems({"全部", "待审核", "审核通过", "审核拒绝"});
     ui->roleStatusCombo->addItems({"全部", "普通用户", "管理员", "超级管理员", "禁用"});
@@ -93,9 +97,38 @@ void AdminWidget::initUI()
         applyRoleFilter();
         LOG() << "重置角色管理筛选条件";
     });
-    connect(ui->addAdminBtn, &QPushButton::clicked, this, []() {
-        LOG() << "点击添加管理员，当前阶段暂不打开添加弹窗";
+    connect(ui->addAdminBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：收集要提升为管理员的账号并提交接口。
+        // 为什么能实现：QInputDialog 提供最小输入窗口，后端负责判断账号存在和角色变化。
+        // 什么时候调用：点击“添加管理员”按钮时调用。
+        // 和谁配合：ApiClient::updateAdminUser() 成功后刷新角色列表。
+        bool accepted = false;
+        const QString account = QInputDialog::getText(this,
+                                                       QStringLiteral("添加管理员"),
+                                                       QStringLiteral("用户账号"),
+                                                       QLineEdit::Normal,
+                                                       QString(),
+                                                       &accepted).trimmed();
+        if (accepted && !account.isEmpty()) {
+            m_apiClient->updateAdminUser(account, "set-admin");
+        }
     });
+
+    connect(m_apiClient, &ApiClient::adminReviewsLoaded, this, &AdminWidget::setAdminReviews);
+    connect(m_apiClient, &ApiClient::adminUsersLoaded, this, &AdminWidget::setAdminUsers);
+    connect(m_apiClient, &ApiClient::adminActionSucceeded, this, [this](const QString &target) {
+        if (target == "reviews") {
+            m_apiClient->fetchAdminReviews();
+        } else {
+            m_apiClient->fetchAdminUsers();
+        }
+    });
+    connect(m_apiClient, &ApiClient::adminRequestFailed, this, [this](const QString &message) {
+        QMessageBox::warning(this, QStringLiteral("后台操作"), message);
+        LOG() << "后台接口失败:" << message;
+    });
+    m_apiClient->fetchAdminReviews();
+    m_apiClient->fetchAdminUsers();
 
     setStyleSheet(R"(
         QWidget#AdminWidget,
@@ -480,11 +513,61 @@ void AdminWidget::appendActionButtons(QTableWidget *table, int row, const QStrin
         button->setObjectName("adminActionButton");
         button->setCursor(Qt::PointingHandCursor);
         button->setMinimumHeight(28);
-        connect(button, &QPushButton::clicked, this, [action, target]() {
-            LOG() << "后台操作:" << action << target;
+        connect(button, &QPushButton::clicked, this, [this, table, action, target]() {
+            // 这是什么：把表格中文操作按钮转换成后台接口动作。
+            // 为什么能实现：所在表格决定审核或角色业务，target 保存 videoId 或 account。
+            // 什么时候调用：点击任意行操作按钮时调用。
+            // 和谁配合：ApiClient POST 成功后重新加载对应表格。
+            if (table == ui->checkTable) {
+                if (action == "通过") {
+                    m_apiClient->reviewVideo(target, "审核通过");
+                } else if (action == "拒绝") {
+                    m_apiClient->reviewVideo(target, "审核拒绝");
+                }
+            } else {
+                QString apiAction;
+                if (action == "设为管理员") apiAction = "set-admin";
+                else if (action == "禁用") apiAction = "disable";
+                else if (action == "启用") apiAction = "enable";
+                else if (action == "删除") apiAction = "delete";
+                if (!apiAction.isEmpty()) {
+                    m_apiClient->updateAdminUser(target, apiAction);
+                }
+            }
         });
         layout->addWidget(button);
     }
 
     table->setCellWidget(row, kActionColumn, box);
+}
+
+void AdminWidget::setAdminReviews(const QList<AdminReviewInfo> &reviews)
+{
+    // 这是什么：把审核接口数据转换成表格内部行模型。
+    // 为什么能实现：AdminReviewInfo 字段与审核表格前五列一一对应。
+    // 什么时候调用：GET /admin/reviews 成功后调用。
+    // 和谁配合：applyCheckFilter() 继续提供本地筛选和分页。
+    m_checkPageState.sourceRows.clear();
+    for (const AdminReviewInfo &review : reviews) {
+        m_checkPageState.sourceRows.append({{"默认封面", review.title, review.userId, review.status, review.uploadTime},
+                                             {"通过", "拒绝"},
+                                             review.videoId});
+    }
+    applyCheckFilter();
+}
+
+void AdminWidget::setAdminUsers(const QList<AdminUserInfo> &users)
+{
+    // 这是什么：把角色接口数据转换成角色管理表格行模型。
+    // 为什么能实现：状态决定显示“启用”或“禁用”，其它动作直接映射后端 action。
+    // 什么时候调用：GET /admin/users 成功后调用。
+    // 和谁配合：applyRoleFilter() 继续提供本地筛选和分页。
+    m_rolePageState.sourceRows.clear();
+    for (const AdminUserInfo &user : users) {
+        const QString statusAction = user.status == "禁用" ? "启用" : "禁用";
+        m_rolePageState.sourceRows.append({{user.account, user.userName, user.role, user.status, user.createdAt},
+                                           {"设为管理员", statusAction, "删除"},
+                                           user.account});
+    }
+    applyRoleFilter();
 }

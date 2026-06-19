@@ -418,6 +418,50 @@ def main():
 
         print("OK: /users/profile communication test passed")
 
+        with urllib.request.urlopen(f"{base_url}/admin/reviews", timeout=3) as response:
+            admin_reviews = json.loads(response.read().decode("utf-8"))
+        assert admin_reviews["success"] is True, "admin reviews should load"
+        assert len(admin_reviews["reviews"]) >= 2, "admin reviews should contain fixtures"
+
+        review_action = post_json(
+            f"{base_url}/admin/reviews/action",
+            {"videoId": "video-001", "status": "审核通过"},
+        )
+        assert review_action["success"] is True, "review action should succeed"
+        with urllib.request.urlopen(f"{base_url}/admin/reviews", timeout=3) as response:
+            updated_reviews = json.loads(response.read().decode("utf-8"))
+        assert updated_reviews["reviews"][0]["status"] == "审核通过", "review status should persist"
+
+        set_admin = post_json(
+            f"{base_url}/admin/users/action",
+            {"account": "bit-user-001", "action": "set-admin"},
+        )
+        assert set_admin["success"] is True, "set admin should succeed"
+        disable_admin = post_json(
+            f"{base_url}/admin/users/action",
+            {"account": "bit-user-001", "action": "disable"},
+        )
+        assert disable_admin["success"] is True, "disable user should succeed"
+        with urllib.request.urlopen(f"{base_url}/admin/users", timeout=3) as response:
+            admin_users = json.loads(response.read().decode("utf-8"))
+        changed_user = next(user for user in admin_users["users"] if user["account"] == "bit-user-001")
+        assert changed_user["role"] == "管理员", "role change should persist"
+        assert changed_user["status"] == "禁用", "status change should persist"
+
+        delete_user = post_json(
+            f"{base_url}/admin/users/action",
+            {"account": "review@bit.com", "action": "delete"},
+        )
+        assert delete_user["success"] is True, "delete admin user should succeed"
+
+        invalid_admin_action = post_json(
+            f"{base_url}/admin/users/action",
+            {"account": "missing", "action": "set-admin"},
+        )
+        assert invalid_admin_action["success"] is False, "missing admin user should fail"
+
+        print("OK: admin API communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url?videoId=video-001", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

@@ -193,6 +193,19 @@ public:
     // 和谁配合：avatarUploaded 更新 DataCenter 和头像按钮，个人资料接口负责后续恢复。
     void uploadAvatar(const QString &filePath);
 
+    // 这是什么：读取后台视频审核列表；为什么能实现：GET 返回结构化审核数组。
+    // 什么时候调用：后台初始化或审核成功后；和谁配合：AdminWidget 表格。
+    void fetchAdminReviews();
+    // 这是什么：提交通过/拒绝审核；为什么能实现：videoId 定位记录，status 表达结果。
+    // 什么时候调用：审核操作按钮点击后；和谁配合：mock 审核状态和列表刷新。
+    void reviewVideo(const QString &videoId, const QString &status);
+    // 这是什么：读取后台角色用户列表；为什么能实现：GET 返回账号角色数组。
+    // 什么时候调用：后台初始化或角色操作成功后；和谁配合：AdminWidget 角色表格。
+    void fetchAdminUsers();
+    // 这是什么：修改用户角色/状态或删除；为什么能实现：account + action 描述操作。
+    // 什么时候调用：角色操作按钮点击后；和谁配合：mock 角色状态和列表刷新。
+    void updateAdminUser(const QString &account, const QString &action);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -422,6 +435,15 @@ signals:
     // 和谁配合：player.cpp 提示错误并保留原头像。
     void avatarUploadFailed(const QString &message);
 
+    // 这是什么：审核列表/角色列表成功信号；为什么能实现：异步结果转为固定结构体列表。
+    // 什么时候触发：对应 GET 成功后；和谁配合：AdminWidget 更新数据源。
+    void adminReviewsLoaded(const QList<AdminReviewInfo> &reviews);
+    void adminUsersLoaded(const QList<AdminUserInfo> &users);
+    // 这是什么：后台写操作成功/失败信号；为什么能实现：统一传递刷新目标或错误原因。
+    // 什么时候触发：审核或角色 POST 完成后；和谁配合：AdminWidget 刷新或提示。
+    void adminActionSucceeded(const QString &target);
+    void adminRequestFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -536,6 +558,10 @@ private:
     // 和谁配合：mock server 根据 ownerAccount 返回 VIDEOS 子集。
     QUrl m_myVideosUrl = QUrl("http://127.0.0.1:8080/users/videos");
     QUrl m_avatarUploadUrl = QUrl("http://127.0.0.1:8080/users/avatar");
+    QUrl m_adminReviewsUrl = QUrl("http://127.0.0.1:8080/admin/reviews");
+    QUrl m_adminReviewActionUrl = QUrl("http://127.0.0.1:8080/admin/reviews/action");
+    QUrl m_adminUsersUrl = QUrl("http://127.0.0.1:8080/admin/users");
+    QUrl m_adminUserActionUrl = QUrl("http://127.0.0.1:8080/admin/users/action");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

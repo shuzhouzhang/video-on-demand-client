@@ -44,6 +44,30 @@ struct CommentInfo {
     QString createdAt;
 };
 
+// 这是什么：后台视频审核列表的一行结构化数据。
+// 为什么这样做：ApiClient 解析后，AdminWidget 不需要直接处理 JSON。
+// 什么时候使用：后台加载审核列表和执行通过/拒绝操作时使用。
+// 和谁配合：mock admin reviews 接口和 AdminWidget 表格。
+struct AdminReviewInfo {
+    QString videoId;
+    QString title;
+    QString userId;
+    QString status;
+    QString uploadTime;
+};
+
+// 这是什么：后台角色管理列表的一行用户数据。
+// 为什么这样做：固定账号、昵称、角色、状态和创建时间字段，方便表格统一渲染。
+// 什么时候使用：后台加载用户列表或修改角色/状态后使用。
+// 和谁配合：mock admin users 接口和 AdminWidget 表格。
+struct AdminUserInfo {
+    QString account;
+    QString userName;
+    QString role;
+    QString status;
+    QString createdAt;
+};
+
 // 这是什么：把后端 /videos 返回的 JSON 响应解析成首页能使用的视频列表。
 // 为什么能实现：VideoInfo 字段和 mock/后端 JSON 字段一一对应，解析后页面不用再关心原始 JSON。
 // 什么时候调用：ApiClient 收到 QNetworkReply 响应体并确认网络请求成功后调用。

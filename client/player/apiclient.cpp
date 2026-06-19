@@ -1254,3 +1254,127 @@ void ApiClient::uploadAvatar(const QString &filePath)
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchAdminReviews()
+{
+    // 这是什么：请求后台视频审核列表。
+    // 为什么能实现：GET 返回审核行数组，客户端逐项转成 AdminReviewInfo。
+    // 什么时候调用：AdminWidget 初始化或审核操作成功后调用。
+    // 和谁配合：adminReviewsLoaded 让审核表格刷新数据源。
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(m_adminReviewsUrl));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit adminRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit adminRequestFailed(obj["message"].toString("审核列表加载失败"));
+            reply->deleteLater();
+            return;
+        }
+        QList<AdminReviewInfo> reviews;
+        for (const QJsonValue &value : obj["reviews"].toArray()) {
+            const QJsonObject item = value.toObject();
+            AdminReviewInfo review;
+            review.videoId = item["videoId"].toString();
+            review.title = item["title"].toString();
+            review.userId = item["userId"].toString();
+            review.status = item["status"].toString();
+            review.uploadTime = item["uploadTime"].toString();
+            if (!review.videoId.isEmpty()) {
+                reviews.append(review);
+            }
+        }
+        emit adminReviewsLoaded(reviews);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::reviewVideo(const QString &videoId, const QString &status)
+{
+    // 这是什么：提交视频审核通过或拒绝结果。
+    // 为什么能实现：videoId 定位审核记录，status 表达最终审核状态。
+    // 什么时候调用：管理员点击审核表格“通过”或“拒绝”时调用。
+    // 和谁配合：adminActionSucceeded 触发 AdminWidget 重新读取审核列表。
+    QNetworkRequest request(m_adminReviewActionUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["videoId"] = videoId;
+    payload["status"] = status;
+    QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
+            emit adminRequestFailed(reply->error() == QNetworkReply::NoError
+                                        ? obj["message"].toString("审核操作失败")
+                                        : reply->errorString());
+        } else {
+            emit adminActionSucceeded("reviews");
+        }
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::fetchAdminUsers()
+{
+    // 这是什么：请求后台角色管理用户列表。
+    // 为什么能实现：GET 返回用户角色数组，客户端转成 AdminUserInfo。
+    // 什么时候调用：AdminWidget 初始化或角色操作成功后调用。
+    // 和谁配合：adminUsersLoaded 刷新角色管理表格。
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(m_adminUsersUrl));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit adminRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit adminRequestFailed(obj["message"].toString("角色列表加载失败"));
+            reply->deleteLater();
+            return;
+        }
+        QList<AdminUserInfo> users;
+        for (const QJsonValue &value : obj["users"].toArray()) {
+            const QJsonObject item = value.toObject();
+            AdminUserInfo user;
+            user.account = item["account"].toString();
+            user.userName = item["userName"].toString();
+            user.role = item["role"].toString();
+            user.status = item["status"].toString();
+            user.createdAt = item["createdAt"].toString();
+            if (!user.account.isEmpty()) {
+                users.append(user);
+            }
+        }
+        emit adminUsersLoaded(users);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::updateAdminUser(const QString &account, const QString &action)
+{
+    // 这是什么：提交添加管理员、设为管理员、启用、禁用或删除用户操作。
+    // 为什么能实现：account 定位用户，action 由后端映射到明确状态变化。
+    // 什么时候调用：角色管理操作按钮或“添加管理员”确认后调用。
+    // 和谁配合：adminActionSucceeded 触发 AdminWidget 重新读取用户列表。
+    QNetworkRequest request(m_adminUserActionUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["account"] = account.trimmed();
+    payload["action"] = action;
+    QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
+            emit adminRequestFailed(reply->error() == QNetworkReply::NoError
+                                        ? obj["message"].toString("角色操作失败")
+                                        : reply->errorString());
+        } else {
+            emit adminActionSucceeded("users");
+        }
+        reply->deleteLater();
+    });
+}

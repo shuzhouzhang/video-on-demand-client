@@ -56,6 +56,15 @@ VIDEO_LIKES = {}
 VIDEO_FAVORITES = {}
 WATCH_PROGRESS = {}
 EMAIL_CODES = {}
+ADMIN_REVIEWS = [
+    {"videoId": "video-001", "title": "Mock 接口返回的视频", "userId": "mock-user-001", "status": "待审核", "uploadTime": "2026-06-09 10:00"},
+    {"videoId": "video-002", "title": "Mock 美食探店视频", "userId": "tester-002", "status": "审核通过", "uploadTime": "2026-06-09 11:00"},
+]
+ADMIN_USERS = {
+    "admin@bit.com": {"userName": "系统管理员", "role": "超级管理员", "status": "启用", "createdAt": "2026-05-01 10:00"},
+    "bit-user-001": {"userName": "BIT 用户", "role": "普通用户", "status": "启用", "createdAt": "2026-06-01 09:00"},
+    "review@bit.com": {"userName": "审核员", "role": "管理员", "status": "启用", "createdAt": "2026-05-12 14:30"},
+}
 COMMENTS = {
     "video-001": [
         {
@@ -145,6 +154,12 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         if path == "/users/videos":
             self.handle_get_user_videos(parsed_url.query)
             return
+        if path == "/admin/reviews":
+            self.write_json(200, {"success": True, "reviews": ADMIN_REVIEWS})
+            return
+        if path == "/admin/users":
+            self.handle_get_admin_users()
+            return
 
         self.send_response(404)
         self.end_headers()
@@ -211,6 +226,12 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/users/profile":
             self.handle_update_user_profile(payload)
+            return
+        if self.path == "/admin/reviews/action":
+            self.handle_admin_review_action(payload)
+            return
+        if self.path == "/admin/users/action":
+            self.handle_admin_user_action(payload)
             return
 
         self.send_response(404)
@@ -801,6 +822,51 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             return
         videos = [video for video in VIDEOS if video.get("ownerAccount") == account]
         self.write_json(200, {"success": True, "videos": videos})
+
+    def handle_admin_review_action(self, payload):
+        # 这是什么：修改某个视频审核记录的最终状态。
+        # 为什么能实现：videoId 定位 ADMIN_REVIEWS 中唯一记录，status 只允许通过或拒绝。
+        # 什么时候调用：后台审核表格点击“通过”或“拒绝”时调用。
+        # 和谁配合：客户端成功后重新 GET /admin/reviews 刷新表格。
+        video_id = str(payload.get("videoId", "")).strip()
+        status = str(payload.get("status", "")).strip()
+        review = next((item for item in ADMIN_REVIEWS if item["videoId"] == video_id), None)
+        if review is None or status not in {"审核通过", "审核拒绝"}:
+            self.write_json(200, {"success": False, "message": "审核参数错误"})
+            return
+        review["status"] = status
+        self.write_json(200, {"success": True, "message": "审核状态已更新"})
+
+    def handle_get_admin_users(self):
+        users = [
+            {"account": account, **info}
+            for account, info in ADMIN_USERS.items()
+        ]
+        self.write_json(200, {"success": True, "users": users})
+
+    def handle_admin_user_action(self, payload):
+        # 这是什么：处理后台用户角色、状态和删除操作。
+        # 为什么能实现：account 定位 ADMIN_USERS，action 映射到确定字段变化。
+        # 什么时候调用：角色表格操作按钮或“添加管理员”提交账号时调用。
+        # 和谁配合：客户端成功后重新 GET /admin/users 刷新表格。
+        account = str(payload.get("account", "")).strip()
+        action = str(payload.get("action", "")).strip()
+        user = ADMIN_USERS.get(account)
+        if user is None:
+            self.write_json(200, {"success": False, "message": "用户不存在"})
+            return
+        if action == "set-admin":
+            user["role"] = "管理员"
+        elif action == "disable":
+            user["status"] = "禁用"
+        elif action == "enable":
+            user["status"] = "启用"
+        elif action == "delete":
+            ADMIN_USERS.pop(account, None)
+        else:
+            self.write_json(200, {"success": False, "message": "角色操作不支持"})
+            return
+        self.write_json(200, {"success": True, "message": "角色操作成功"})
 
 
 def create_server(host="127.0.0.1", port=8080):
