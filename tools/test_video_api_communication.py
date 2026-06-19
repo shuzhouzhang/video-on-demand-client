@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 import threading
 import time
 import urllib.request
+import uuid
 
 from mock_videos_server import create_server
 
@@ -16,6 +18,47 @@ def post_json(url, payload):
         url,
         data=body,
         headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=3) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def post_multipart(url, metadata, video_content, cover_content=b""):
+    # 这是什么：构造通信测试使用的最小 multipart/form-data 请求。
+    # 为什么能实现：boundary 分隔 JSON、视频和封面部分，格式与 QHttpMultiPart 发出的请求一致。
+    # 什么时候调用：验证 POST /videos/upload 是否真的接收二进制文件时调用。
+    # 和谁配合：mock server 的 MIME 解析器拆分字段并保存文件。
+    boundary = f"----codex-test-{uuid.uuid4().hex}"
+    chunks = []
+
+    def add_part(headers, content):
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        for header in headers:
+            chunks.append(f"{header}\r\n".encode("utf-8"))
+        chunks.append(b"\r\n")
+        chunks.append(content)
+        chunks.append(b"\r\n")
+
+    add_part(
+        ["Content-Disposition: form-data; name=\"metadata\"", "Content-Type: application/json"],
+        json.dumps(metadata, ensure_ascii=False).encode("utf-8"),
+    )
+    add_part(
+        ["Content-Disposition: form-data; name=\"videoFile\"; filename=\"sample.mp4\""],
+        video_content,
+    )
+    if cover_content:
+        add_part(
+            ["Content-Disposition: form-data; name=\"coverFile\"; filename=\"cover.png\""],
+            cover_content,
+        )
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(chunks)
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=3) as response:
@@ -433,6 +476,42 @@ def main():
             },
         )
         assert upload_missing_account["success"] is False, "upload should fail without account"
+
+        file_upload = post_multipart(
+            f"{base_url}/videos/upload",
+            {
+                "title": "真实文件上传测试",
+                "description": "multipart upload",
+                "category": "科技",
+                "tags": ["编程开发"],
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+                "videoFileName": "sample.mp4",
+                "coverFileName": "cover.png",
+            },
+            b"fake-mp4-binary-content",
+            b"fake-png-binary-content",
+        )
+        assert file_upload["success"] is True, "multipart file upload should succeed"
+        stored_video_path = Path(file_upload["video"]["storedVideoPath"])
+        stored_cover_path = Path(file_upload["video"]["storedCoverPath"])
+        assert stored_video_path.read_bytes() == b"fake-mp4-binary-content", "server should save video bytes"
+        assert stored_cover_path.read_bytes() == b"fake-png-binary-content", "server should save cover bytes"
+
+        missing_file_upload = post_multipart(
+            f"{base_url}/videos/upload",
+            {
+                "title": "缺少视频文件",
+                "category": "科技",
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+            },
+            b"",
+        )
+        assert missing_file_upload["success"] is False, "multipart upload should require video bytes"
+
+        stored_video_path.unlink(missing_ok=True)
+        stored_cover_path.unlink(missing_ok=True)
 
         print("OK: /videos upload communication test passed")
     finally:

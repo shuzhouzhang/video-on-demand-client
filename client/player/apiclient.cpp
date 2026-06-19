@@ -3,6 +3,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFile>
+#include <QFileInfo>
+#include <QHttpMultiPart>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -155,12 +158,19 @@ void ApiClient::login(const QString &account, const QString &password)
 
 void ApiClient::uploadVideo(const UploadVideoInfo &info)
 {
-    // 这是什么：描述一次 POST /videos 上传元数据请求。
-    // 为什么能实现：第一版上传只需要 JSON 元数据，QNetworkRequest 设置好 URL 和 Content-Type 后即可发送。
-    // 什么时候调用：UploadVideoPage 完成本地表单校验，并准备好当前用户信息后调用。
-    // 和谁配合：m_uploadVideoUrl 指向 mock server 或真实后端的视频发布接口。
-    QNetworkRequest request(m_uploadVideoUrl);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    // 这是什么：使用 multipart/form-data 上传视频元数据和真实文件。
+    // 为什么能实现：QHttpMultiPart 可在同一个 HTTP 请求中同时承载 JSON、视频二进制和封面二进制。
+    // 什么时候调用：上传页完成表单、登录和本地文件校验后调用。
+    // 和谁配合：UploadVideoPage 提供路径，mock/后端保存文件并返回创建结果。
+    auto *videoFile = new QFile(info.videoFilePath);
+    if (!videoFile->open(QIODevice::ReadOnly)) {
+        emit uploadFailed("视频文件无法读取");
+        delete videoFile;
+        return;
+    }
+
+    QNetworkRequest request(m_uploadVideoFilesUrl);
+    auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
     QJsonArray tagArray;
     for (const QString &tag : info.tags) {
@@ -176,18 +186,58 @@ void ApiClient::uploadVideo(const UploadVideoInfo &info)
     payload["account"] = info.account;
     payload["videoFileName"] = info.videoFileName;
     payload["coverFileName"] = info.coverFileName;
-    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
 
-    // 这是什么：真正发送上传元数据请求。
-    // 为什么能实现：post() 异步发送 JSON，请求结束后通过 finished 信号读取后端发布结果。
-    // 什么时候调用：上传请求体构造完成后立刻调用。
-    // 和谁配合：下面的 finished 槽函数把响应转成 uploadSucceeded/uploadFailed。
-    QNetworkReply *reply = m_networkManager->post(request, body);
+    QHttpPart metadataPart;
+    metadataPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                           QVariant("form-data; name=\"metadata\""));
+    metadataPart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("application/json"));
+    metadataPart.setBody(QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    multiPart->append(metadataPart);
+
+    QHttpPart videoPart;
+    videoPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                        QVariant(QString("form-data; name=\"videoFile\"; filename=\"%1\"")
+                                     .arg(QFileInfo(info.videoFilePath).fileName())));
+    videoPart.setBodyDevice(videoFile);
+    videoFile->setParent(multiPart);
+    multiPart->append(videoPart);
+
+    if (!info.coverFilePath.isEmpty()) {
+        auto *coverFile = new QFile(info.coverFilePath);
+        if (!coverFile->open(QIODevice::ReadOnly)) {
+            emit uploadFailed("封面文件无法读取");
+            delete multiPart;
+            return;
+        }
+        QHttpPart coverPart;
+        coverPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                            QVariant(QString("form-data; name=\"coverFile\"; filename=\"%1\"")
+                                         .arg(QFileInfo(info.coverFilePath).fileName())));
+        coverPart.setBodyDevice(coverFile);
+        coverFile->setParent(multiPart);
+        multiPart->append(coverPart);
+    }
+
+    // 这是什么：真正发送包含文件流的 multipart 请求。
+    // 为什么能实现：QNetworkAccessManager 会边读取 QFile 边上传，不需要把大视频一次性装进内存。
+    // 什么时候调用：metadata、videoFile 和可选 coverFile 都加入 multiPart 后调用。
+    // 和谁配合：reply 管理 multiPart 生命周期，finished 回调解析后端结果。
+    QNetworkReply *reply = m_networkManager->post(request, multiPart);
+    multiPart->setParent(reply);
+    connect(reply, &QNetworkReply::uploadProgress, this, [this](qint64 sent, qint64 total) {
+        // 这是什么：把 Qt 的上传字节进度转换成页面易用的百分比。
+        // 为什么能实现：sent/total 表示当前已发送比例，限制到 0~100 可避免异常值。
+        // 什么时候调用：multipart 正在传输时由 QNetworkReply 持续触发。
+        // 和谁配合：UploadVideoPage 接收 uploadProgressChanged 更新进度文字。
+        if (total > 0) {
+            emit uploadProgressChanged(qBound(0, static_cast<int>(sent * 100 / total), 100));
+        }
+    });
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        // 这是什么：处理上传视频元数据接口返回结果。
-        // 为什么能实现：finished 触发时 reply 里已有网络状态和响应体，可统一解析 success/message。
-        // 什么时候调用：Qt 事件循环收到 POST /videos 完成信号时自动调用。
-        // 和谁配合：成功通知上传页收尾，失败通知上传页恢复按钮并显示错误。
+        // 这是什么：处理真实文件上传接口返回结果。
+        // 为什么能实现：finished 时 multipart 已发送完毕，响应 JSON 会说明文件和元数据是否保存成功。
+        // 什么时候调用：Qt 事件循环收到 POST /videos/upload 完成信号时自动调用。
+        // 和谁配合：成功发 uploadSucceeded，失败发 uploadFailed；reply 销毁时同时清理文件对象。
         if (reply->error() != QNetworkReply::NoError) {
             emit uploadFailed(reply->errorString());
             reply->deleteLater();

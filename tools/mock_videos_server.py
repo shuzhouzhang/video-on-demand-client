@@ -1,6 +1,10 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
+from email.parser import BytesParser
+from email.policy import default
 import json
+from pathlib import Path
+import tempfile
 from urllib.parse import parse_qs, urlparse
 
 
@@ -71,6 +75,8 @@ COMMENTS = {
     "video-002": [],
 }
 
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "video-on-demand-client-mock-uploads"
+
 
 class MockVideosHandler(BaseHTTPRequestHandler):
     def write_json(self, status, payload):
@@ -137,6 +143,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path == "/videos/upload":
+            self.handle_upload_video_files()
+            return
+
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length).decode("utf-8")
         try:
@@ -243,6 +253,86 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         VIDEOS.append(video)
         COMMENTS[video["id"]] = []
         self.write_json(200, {"success": True, "message": "发布成功", "video": video})
+
+    def handle_upload_video_files(self):
+        # 这是什么：处理真实视频和封面文件的 multipart 上传。
+        # 为什么能实现：email MIME 解析器能按 boundary 拆出 metadata、videoFile 和 coverFile 三个表单部分。
+        # 什么时候调用：Qt ApiClient::uploadVideo() POST /videos/upload 时调用。
+        # 和谁配合：保存文件后创建 VideoInfo 数据，后续 /users/videos 可立即查询到作品。
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self.write_json(200, {"success": False, "message": "上传格式必须是 multipart/form-data"})
+            return
+
+        length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(length)
+        mime_message = BytesParser(policy=default).parsebytes(
+            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+            + raw_body
+        )
+
+        metadata = {}
+        files = {}
+        for part in mime_message.iter_parts():
+            field_name = part.get_param("name", header="content-disposition")
+            if not field_name:
+                continue
+            content = part.get_payload(decode=True) or b""
+            if field_name == "metadata":
+                try:
+                    metadata = json.loads(content.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self.write_json(200, {"success": False, "message": "视频元数据格式错误"})
+                    return
+            else:
+                files[field_name] = {
+                    "filename": Path(part.get_filename() or "").name,
+                    "content": content,
+                }
+
+        title = str(metadata.get("title", "")).strip()
+        account = str(metadata.get("account", "")).strip()
+        category = str(metadata.get("category", "")).strip()
+        video_part = files.get("videoFile")
+        if not title or not account or not category:
+            self.write_json(200, {"success": False, "message": "标题、账号和分类不能为空"})
+            return
+        if not video_part or not video_part["filename"] or not video_part["content"]:
+            self.write_json(200, {"success": False, "message": "视频文件不能为空"})
+            return
+
+        video_id = f"video-{len(VIDEOS) + 1:03d}"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        stored_video_name = f"{video_id}-{video_part['filename']}"
+        video_path = UPLOAD_DIR / stored_video_name
+        video_path.write_bytes(video_part["content"])
+
+        cover_part = files.get("coverFile")
+        stored_cover_name = ""
+        if cover_part and cover_part["filename"] and cover_part["content"]:
+            stored_cover_name = f"{video_id}-{cover_part['filename']}"
+            (UPLOAD_DIR / stored_cover_name).write_bytes(cover_part["content"])
+
+        video = {
+            "id": video_id,
+            "title": title,
+            "userName": str(metadata.get("userName", "")).strip() or account,
+            "ownerAccount": account,
+            "date": datetime.now().strftime("%m-%d"),
+            "duration": "00:00",
+            "playCount": "0",
+            "likeCount": "0",
+            "category": category,
+            "tags": metadata.get("tags", []),
+            "description": str(metadata.get("description", "")).strip(),
+            "videoFileName": video_part["filename"],
+            "coverFileName": cover_part["filename"] if cover_part else "",
+            "storedVideoPath": str(video_path),
+            "storedCoverPath": str(UPLOAD_DIR / stored_cover_name) if stored_cover_name else "",
+        }
+        VIDEOS.append(video)
+        COMMENTS[video_id] = []
+        self.write_json(200, {"success": True, "message": "文件上传成功", "video": video})
 
     def handle_play_url(self):
         # 这是什么：处理最小版播放地址接口 GET /videos/play-url。

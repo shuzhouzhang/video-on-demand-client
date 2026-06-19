@@ -97,6 +97,14 @@ void UploadVideoPage::initUI()
     connect(ui->commitBtn, &QPushButton::clicked, this, &UploadVideoPage::commitUpload);
     connect(m_apiClient, &ApiClient::uploadSucceeded, this, &UploadVideoPage::onUploadSucceeded);
     connect(m_apiClient, &ApiClient::uploadFailed, this, &UploadVideoPage::onUploadFailed);
+    connect(m_apiClient, &ApiClient::uploadProgressChanged, this, [this](int percent) {
+        // 这是什么：上传页接收真实文件发送百分比。
+        // 为什么能实现：ApiClient 已把字节数换算成 0~100，页面只需更新文字。
+        // 什么时候调用：multipart 文件上传过程中由 Qt 信号槽自动调用。
+        // 和谁配合：uploadProgressLabel 和 commitBtn 同步告诉用户当前进度。
+        ui->uploadProgressLabel->setText(QStringLiteral("上传中 %1%").arg(percent));
+        ui->commitBtn->setText(QStringLiteral("上传中 %1%").arg(percent));
+    });
 
     resetPage();
 
@@ -420,9 +428,11 @@ void UploadVideoPage::commitUpload()
     uploadInfo.account = currentUser.account;
     uploadInfo.videoFileName = videoFileInfo.fileName();
     uploadInfo.coverFileName = coverFileInfo.fileName();
+    uploadInfo.videoFilePath = m_videoPath;
+    uploadInfo.coverFilePath = m_coverPath;
 
-    // 这是什么：把上传页表单提交给临时上传接口。
-    // 为什么能实现：ApiClient::uploadVideo() 会把 UploadVideoInfo 转成 JSON，并异步 POST 到 /videos。
+    // 这是什么：把上传页表单和真实文件路径提交给上传接口。
+    // 为什么能实现：ApiClient::uploadVideo() 使用 multipart 同时发送 JSON、视频和可选封面。
     // 什么时候调用：视频、标题、分类、标签数量和登录状态都校验通过后调用。
     // 和谁配合：DataCenter 提供当前用户，ApiClient 负责网络请求，onUploadSucceeded/onUploadFailed 负责收尾。
     setCommitButtonRequesting(true);
@@ -437,8 +447,8 @@ void UploadVideoPage::commitUpload()
 
 void UploadVideoPage::onUploadSucceeded(const QString &message)
 {
-    // 这是什么：处理上传元数据接口成功结果。
-    // 为什么能实现：ApiClient 已确认 POST /videos 返回 success=true，并把 message 传回页面。
+    // 这是什么：处理真实视频文件上传成功结果。
+    // 为什么能实现：ApiClient 已确认 POST /videos/upload 返回 success=true，并把 message 传回页面。
     // 什么时候调用：ApiClient::uploadSucceeded 信号触发时由 Qt 自动调用。
     // 和谁配合：上传按钮恢复、页面重置，并通过 backToMyPage 回到“我的”页面。
     setCommitButtonRequesting(false);
@@ -449,7 +459,7 @@ void UploadVideoPage::onUploadSucceeded(const QString &message)
 
 void UploadVideoPage::onUploadFailed(const QString &message)
 {
-    // 这是什么：处理上传元数据接口失败结果。
+    // 这是什么：处理真实视频文件上传失败结果。
     // 为什么能实现：ApiClient 会把网络错误、响应格式错误或后端业务失败统一转成 message。
     // 什么时候调用：ApiClient::uploadFailed 信号触发时由 Qt 自动调用。
     // 和谁配合：上传按钮恢复可点，QMessageBox 把失败原因展示给用户。
@@ -488,7 +498,7 @@ QStringList UploadVideoPage::selectedTags() const
 void UploadVideoPage::setCommitButtonRequesting(bool requesting)
 {
     // 这是什么：切换发布按钮的请求中状态。
-    // 为什么能实现：网络请求是异步的，禁用按钮可以避免用户连续点击发出重复 POST /videos。
+    // 为什么能实现：网络请求是异步的，禁用按钮可以避免用户连续点击重复上传大文件。
     // 什么时候调用：开始上传前置为 true，上传成功或失败后恢复为 false。
     // 和谁配合：commitUpload()、onUploadSucceeded()、onUploadFailed() 共同维护这一个状态。
     m_isUploadRequesting = requesting;

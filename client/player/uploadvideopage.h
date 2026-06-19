@@ -1,5 +1,5 @@
 // uploadvideopage.h 声明上传视频页面组件。
-// UploadVideoPage 负责承载上传视频表单，并把第一版视频元数据提交到临时接口。
+// UploadVideoPage 负责承载上传视频表单，并把元数据、视频和封面提交到上传接口。
 #ifndef UPLOADVIDEOPAGE_H
 #define UPLOADVIDEOPAGE_H
 

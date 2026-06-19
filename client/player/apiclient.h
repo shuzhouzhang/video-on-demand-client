@@ -11,10 +11,10 @@
 
 class QNetworkAccessManager;
 
-// 这是什么：上传视频接口第一版需要发送的元数据。
-// 为什么这样做：第一阶段只联调表单字段，不传真实文件二进制，用结构体把页面字段整理后交给 ApiClient。
+// 这是什么：真实视频上传需要的表单元数据和本地文件路径。
+// 为什么这样做：结构体把页面字段、视频路径和封面路径统一交给 ApiClient 组装 multipart 请求。
 // 什么时候使用：上传页表单校验通过后创建它，并调用 ApiClient::uploadVideo()。
-// 和谁配合：UploadVideoPage 负责填充字段，mock/后端 POST /videos 负责接收 JSON。
+// 和谁配合：UploadVideoPage 负责填充，mock/后端 POST /videos/upload 接收 JSON 和二进制文件。
 struct UploadVideoInfo {
     QString title;
     QString description;
@@ -24,6 +24,8 @@ struct UploadVideoInfo {
     QString account;
     QString videoFileName;
     QString coverFileName;
+    QString videoFilePath;
+    QString coverFilePath;
 };
 
 // 这是什么：ApiClient 是客户端访问后端接口的统一入口。
@@ -53,8 +55,8 @@ public:
     // 和谁配合：Login 负责收集输入和展示结果，ApiClient 负责发送请求并发出登录成功/失败信号。
     void login(const QString &account, const QString &password);
 
-    // 这是什么：请求上传视频元数据接口。
-    // 为什么能实现：把上传页整理好的 UploadVideoInfo 转成 JSON，用 POST /videos 发给 mock/后端。
+    // 这是什么：请求真实视频文件上传接口。
+    // 为什么能实现：把 UploadVideoInfo 拆成 JSON metadata、videoFile 和可选 coverFile multipart 部分。
     // 什么时候调用：上传页表单校验通过，并确认当前用户已登录后调用。
     // 和谁配合：UploadVideoPage 收集表单并响应 uploadSucceeded/uploadFailed 信号。
     void uploadVideo(const UploadVideoInfo &info);
@@ -203,6 +205,12 @@ signals:
     // 什么时候触发：uploadVideo() 请求失败或后端拒绝本次发布时触发。
     // 和谁配合：UploadVideoPage 收到后恢复发布按钮并提示错误原因。
     void uploadFailed(const QString &message);
+
+    // 这是什么：真实文件上传进度通知。
+    // 为什么能实现：QNetworkReply::uploadProgress 会持续给出已发送和总字节数，可换算为百分比。
+    // 什么时候触发：multipart 请求发送过程中触发，范围为 0 到 100。
+    // 和谁配合：UploadVideoPage 更新进度文字和发布按钮。
+    void uploadProgressChanged(int percent);
 
     // 这是什么：播放地址接口成功后的通知信号。
     // 为什么能实现：GET /videos/play-url 返回 success=true 和 playUrl 后，ApiClient 可以把地址交给播放页。
@@ -390,6 +398,12 @@ private:
     // 什么时候使用：uploadVideo() 创建 POST /videos 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 处理同路径的上传请求。
     QUrl m_uploadVideoUrl = QUrl("http://127.0.0.1:8080/videos");
+
+    // 这是什么：真实视频文件上传接口地址。
+    // 为什么这样做：multipart 请求与旧的纯 JSON 元数据请求分开，后端可明确解析二进制文件。
+    // 什么时候使用：uploadVideo() 校验本地文件可读后使用。
+    // 和谁配合：UploadVideoPage 提供路径，mock server 保存 videoFile/coverFile 部分。
+    QUrl m_uploadVideoFilesUrl = QUrl("http://127.0.0.1:8080/videos/upload");
 
     // 这是什么：当前最小版播放地址接口地址。
     // 为什么这样做：先不引入 videoId，固定接口能最快验证播放页从网络拿播放地址。
