@@ -161,6 +161,12 @@ public:
     // 和谁配合：userProfileUpdated 通知 player.cpp 刷新“我的”页面。
     void updateUserProfile(const QString &userName, const QString &description);
 
+    // 这是什么：请求当前登录用户发布的视频列表。
+    // 为什么能实现：DataCenter 提供账号，后端按视频 ownerAccount 字段筛选。
+    // 什么时候调用：用户点击“我的视频”或上传成功返回“我的”页面时调用。
+    // 和谁配合：myVideosLoaded 把标准 VideoInfo 列表交给 player.cpp 渲染。
+    void fetchMyVideos();
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -342,6 +348,18 @@ signals:
     // 和谁配合：player.cpp/ProfileDialog 展示错误并保留原资料。
     void userProfileFailed(const QString &message);
 
+    // 这是什么：当前用户作品列表加载成功后的通知。
+    // 为什么能实现：我的视频接口沿用 VideoInfo 字段，页面可复用 VideoBox。
+    // 什么时候触发：GET /users/videos 成功时触发，空列表也属于成功。
+    // 和谁配合：player.cpp 调用 renderMyVideoList() 展示“我的作品”。
+    void myVideosLoaded(const QList<VideoInfo> &videos);
+
+    // 这是什么：我的视频列表加载失败后的通知。
+    // 为什么能实现：未登录、网络错误和业务失败统一转换成 message。
+    // 什么时候触发：fetchMyVideos() 无法完成时触发。
+    // 和谁配合：player.cpp 在作品区域展示错误但不影响其它页面。
+    void myVideosFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -435,6 +453,12 @@ private:
     // 什么时候使用：fetchUserProfile() 和 updateUserProfile() 发请求时使用。
     // 和谁配合：mock server 的 USERS 内存数据。
     QUrl m_userProfileUrl = QUrl("http://127.0.0.1:8080/users/profile");
+
+    // 这是什么：当前用户发布视频列表接口地址。
+    // 为什么这样做：用户资源下的视频集合使用独立 GET 路径表达归属关系。
+    // 什么时候使用：fetchMyVideos() 创建请求时使用。
+    // 和谁配合：mock server 根据 ownerAccount 返回 VIDEOS 子集。
+    QUrl m_myVideosUrl = QUrl("http://127.0.0.1:8080/users/videos");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

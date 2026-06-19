@@ -595,6 +595,21 @@ void player::initUI()
         }
         LOG() << "个人资料接口失败:" << message;
     });
+    connect(m_apiClient, &ApiClient::myVideosLoaded, this, [this](const QList<VideoInfo> &videos) {
+        // 这是什么：把当前用户发布的视频展示到“我的作品”区域。
+        // 为什么能实现：接口返回标准 VideoInfo，可复用收藏列表已经建立的 VideoBox 网格。
+        // 什么时候调用：GET /users/videos 成功后调用。
+        // 和谁配合：上传接口写入视频，fetchMyVideos() 读回，renderMyVideoList() 展示。
+        renderMyVideoList(videos, QStringLiteral("我的作品"), QStringLiteral("暂无作品"));
+        ui->myWorksCountLabel->setText(QString::number(videos.size()));
+        LOG() << "我的视频加载完成，数量:" << videos.size();
+    });
+    connect(m_apiClient, &ApiClient::myVideosFailed, this, [this](const QString &message) {
+        ui->myWorksTitleLabel->setText(QStringLiteral("我的作品"));
+        ui->myWorksEmptyLabel->setText(message);
+        ui->myWorksEmptyLabel->show();
+        LOG() << "我的视频加载失败:" << message;
+    });
     connect(m_profileDialog, &ProfileDialog::saveRequested, this, [this](const QString &userName,
                                                                          const QString &description) {
         // 这是什么：资料窗口提交表单后的接口入口。
@@ -644,8 +659,15 @@ void player::initUI()
     connect(ui->sysPageBtn, &PageSwitchButton::clicked, this, [switchNavButton]() {
         switchNavButton(2);
     });
-    connect(ui->uploadVideoPage, &UploadVideoPage::backToMyPage, this, [switchNavButton]() {
+    connect(ui->uploadVideoPage, &UploadVideoPage::backToMyPage, this, [this, switchNavButton]() {
+        // 这是什么：上传页成功返回个人页后的作品刷新。
+        // 为什么能实现：上传接口已把新视频写入后端，再请求我的视频即可得到最新列表。
+        // 什么时候调用：UploadVideoPage 发出 backToMyPage 信号时调用。
+        // 和谁配合：switchNavButton() 切页，ApiClient::fetchMyVideos() 更新作品卡片。
         switchNavButton(1);
+        if (DataCenter::instance().isLoggedIn()) {
+            m_apiClient->fetchMyVideos();
+        }
     });
 
     // 无边框窗口没有系统标题栏，右上角窗口按钮需要自己接系统行为。
@@ -718,7 +740,12 @@ void player::initUI()
             return;
         }
 
-        LOG() << "点击我的视频入口，当前阶段暂不加载作品列表";
+        ui->myWorksTitleLabel->setText(QStringLiteral("我的作品"));
+        ui->myWorksEmptyLabel->setText(QStringLiteral("正在加载作品..."));
+        ui->myWorksEmptyLabel->show();
+        clearLayout(m_myVideoGridLayout);
+        m_apiClient->fetchMyVideos();
+        LOG() << "请求我的视频列表";
     });
     connect(ui->followEntryBtn, &QPushButton::clicked, this, [this]() {
         if (!DataCenter::instance().isLoggedIn()) {

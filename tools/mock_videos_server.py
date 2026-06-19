@@ -129,6 +129,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_get_user_profile(parsed_url.query)
             return
 
+        if path == "/users/videos":
+            self.handle_get_user_videos(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -221,7 +225,24 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.write_json(200, {"success": False, "message": "请先选择视频文件"})
             return
 
-        self.write_json(200, {"success": True, "message": "发布成功"})
+        video = {
+            "id": f"video-{len(VIDEOS) + 1:03d}",
+            "title": title,
+            "userName": str(payload.get("userName", "")).strip() or account,
+            "ownerAccount": account,
+            "date": datetime.now().strftime("%m-%d"),
+            "duration": "00:00",
+            "playCount": "0",
+            "likeCount": "0",
+            "category": category,
+            "tags": payload.get("tags", []),
+            "description": str(payload.get("description", "")).strip(),
+            "videoFileName": video_file_name,
+            "coverFileName": str(payload.get("coverFileName", "")).strip(),
+        }
+        VIDEOS.append(video)
+        COMMENTS[video["id"]] = []
+        self.write_json(200, {"success": True, "message": "发布成功", "video": video})
 
     def handle_play_url(self):
         # 这是什么：处理最小版播放地址接口 GET /videos/play-url。
@@ -545,6 +566,18 @@ class MockVideosHandler(BaseHTTPRequestHandler):
                 },
             },
         )
+
+    def handle_get_user_videos(self, query):
+        # 这是什么：返回当前账号发布的视频列表。
+        # 为什么能实现：上传接口会把 account 写进 ownerAccount，按该字段筛选即可确定作品归属。
+        # 什么时候调用：用户点击“我的视频”或上传成功后刷新作品时调用。
+        # 和谁配合：ApiClient::fetchMyVideos() 解析结果，player.cpp 展示 VideoBox。
+        account = parse_qs(query).get("account", [""])[0].strip()
+        if not account:
+            self.write_json(200, {"success": False, "message": "请先登录后查看作品"})
+            return
+        videos = [video for video in VIDEOS if video.get("ownerAccount") == account]
+        self.write_json(200, {"success": True, "videos": videos})
 
 
 def create_server(host="127.0.0.1", port=8080):

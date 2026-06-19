@@ -397,6 +397,20 @@ def main():
             },
         )
         assert upload_success["success"] is True, "upload should succeed with required metadata"
+        assert upload_success["video"]["title"] == "测试上传视频", "upload should return created video"
+
+        with urllib.request.urlopen(
+            f"{base_url}/users/videos?account=bit-user-001",
+            timeout=3,
+        ) as response:
+            my_videos = json.loads(response.read().decode("utf-8"))
+        assert my_videos["success"] is True, "my videos should load"
+        assert len(my_videos["videos"]) == 1, "uploaded video should appear in my videos"
+        assert my_videos["videos"][0]["title"] == "测试上传视频", "my videos should return uploaded metadata"
+
+        with urllib.request.urlopen(f"{base_url}/users/videos", timeout=3) as response:
+            missing_my_videos = json.loads(response.read().decode("utf-8"))
+        assert missing_my_videos["success"] is False, "my videos should require account"
 
         upload_missing_title = post_json(
             f"{base_url}/videos",

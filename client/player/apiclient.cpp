@@ -977,3 +977,48 @@ void ApiClient::updateUserProfile(const QString &userName, const QString &descri
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchMyVideos()
+{
+    // 这是什么：读取当前账号发布的全部视频。
+    // 为什么能实现：account 放入 GET 参数，后端根据 ownerAccount 筛选并返回标准视频数组。
+    // 什么时候调用：用户点击“我的视频”或刚上传成功回到个人页时调用。
+    // 和谁配合：myVideosLoaded 把结果交给 player.cpp 的通用视频列表渲染函数。
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (user.account.isEmpty()) {
+        emit myVideosFailed("请先登录后查看作品");
+        return;
+    }
+
+    QUrl url = m_myVideosUrl;
+    QUrlQuery query;
+    query.addQueryItem("account", user.account);
+    url.setQuery(query);
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理我的视频接口响应。
+        // 为什么能实现：每一项字段与 VideoInfo 一致，可复用统一 JSON 转换函数。
+        // 什么时候调用：GET /users/videos 完成后由 Qt 自动调用。
+        // 和谁配合：成功发 myVideosLoaded，失败发 myVideosFailed。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit myVideosFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit myVideosFailed(obj["message"].toString("我的视频加载失败"));
+            reply->deleteLater();
+            return;
+        }
+        QList<VideoInfo> videos;
+        for (const QJsonValue &value : obj["videos"].toArray()) {
+            const VideoInfo video = videoInfoFromJsonObject(value.toObject());
+            if (!video.id.isEmpty()) {
+                videos.append(video);
+            }
+        }
+        emit myVideosLoaded(videos);
+        reply->deleteLater();
+    });
+}
