@@ -17,7 +17,7 @@ public:
     explicit VideoBox(QWidget *parent = nullptr);
     ~VideoBox() override;
 
-    // 第一版使用静态展示数据，后续接真实接口时可替换成 VideoInfo 模型。
+    // 接收 VideoInfo 对应字段并刷新视频卡片展示。
     void setVideoInfo(const QString &id,
                       const QString &title,
                       const QString &userName,

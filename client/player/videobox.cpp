@@ -1,5 +1,5 @@
 // videobox.cpp 实现首页视频卡片组件。
-// 当前版本展示静态数据，点击封面或标题时发出信号，由主窗口决定是否打开播放页。
+// 当前版本展示 VideoInfo 数据，点击封面或标题时发出带 videoId 的信号，由主窗口打开播放页。
 #include "videobox.h"
 #include "ui_videobox.h"
 #include "util.h"

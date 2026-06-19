@@ -1,5 +1,5 @@
 // playerpage.h 声明视频播放页组件。
-// PlayerPage 是一个独立窗口，第一版只承载播放页静态壳子和基础按钮行为。
+// PlayerPage 是独立播放窗口，承载 libmpv、详情、互动、评论和播放记录接口协作。
 #ifndef PLAYERPAGE_H
 #define PLAYERPAGE_H
 

@@ -28,7 +28,7 @@ public:
     void reset();
 
 signals:
-    // 第一版静态登录不接后端，账号和密码通过前端基础校验后就认为登录成功。
+    // 密码和邮箱验证码都会先做前端格式校验，再通过 ApiClient 请求后端确认登录结果。
     void loginSuccess(const QString &userName, const QString &account);
 
 protected:

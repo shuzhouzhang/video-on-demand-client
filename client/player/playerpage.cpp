@@ -1,5 +1,4 @@
-// playerpage.cpp 实现视频播放页的静态 UI 和基础交互。
-// 播放页已接入 libmpv，负责播放控制、时间同步和视频信息展示。
+// playerpage.cpp 实现 libmpv 播放控制，并协调详情、弹幕、点赞、收藏、评论和播放记录接口。
 #include "playerpage.h"
 #include "apiclient.h"
 #include "bulletscreenitem.h"
