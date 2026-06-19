@@ -129,6 +129,77 @@ def main():
 
         print("OK: /videos/watch-progress communication test passed")
 
+        with urllib.request.urlopen(
+            f"{base_url}/videos/comments?videoId=video-001",
+            timeout=3,
+        ) as response:
+            comments_body = response.read().decode("utf-8")
+            comments = json.loads(comments_body)
+
+        assert comments["success"] is True, "comments should load with valid videoId"
+        assert isinstance(comments["comments"], list), "comments should be a JSON array"
+        assert len(comments["comments"]) >= 1, "comments should include seeded test data"
+
+        sent_comment = post_json(
+            f"{base_url}/videos/comments",
+            {
+                "videoId": "video-001",
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+                "content": "这是一条通信测试评论",
+            },
+        )
+        assert sent_comment["success"] is True, "logged-in user should send comment"
+        assert sent_comment["comment"]["content"] == "这是一条通信测试评论", "comment should echo content"
+        assert sent_comment["comment"]["videoId"] == "video-001", "comment should belong to requested video"
+
+        with urllib.request.urlopen(
+            f"{base_url}/videos/comments?videoId=video-001",
+            timeout=3,
+        ) as response:
+            refreshed_comments = json.loads(response.read().decode("utf-8"))
+
+        assert refreshed_comments["comments"][0]["id"] == sent_comment["comment"]["id"], "new comment should be first"
+
+        empty_comment = post_json(
+            f"{base_url}/videos/comments",
+            {
+                "videoId": "video-001",
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+                "content": "",
+            },
+        )
+        assert empty_comment["success"] is False, "empty comment should fail"
+
+        guest_comment = post_json(
+            f"{base_url}/videos/comments",
+            {
+                "videoId": "video-001",
+                "userName": "",
+                "account": "",
+                "content": "游客不应该能发表评论",
+            },
+        )
+        assert guest_comment["success"] is False, "guest comment should require login"
+
+        missing_comment_video = post_json(
+            f"{base_url}/videos/comments",
+            {
+                "videoId": "",
+                "userName": "BIT 用户",
+                "account": "bit-user-001",
+                "content": "缺少视频 id",
+            },
+        )
+        assert missing_comment_video["success"] is False, "comment should fail without videoId"
+
+        with urllib.request.urlopen(f"{base_url}/videos/comments", timeout=3) as response:
+            missing_comment_query = json.loads(response.read().decode("utf-8"))
+        assert missing_comment_query["success"] is False, "comment list should fail without videoId"
+
+        print("OK: /videos/comments communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

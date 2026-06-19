@@ -107,6 +107,18 @@ public:
     // 和谁配合：mock/后端保存记录，下次 fetchWatchProgress() 再读回来。
     void saveWatchProgress(const QString &videoId, int seconds);
 
+    // 这是什么：请求当前视频的评论列表。
+    // 为什么能实现：把 videoId 放进 GET 查询参数，后端即可返回该视频对应的评论数组。
+    // 什么时候调用：用户在播放页打开评论窗口时调用。
+    // 和谁配合：CommentDialog 显示加载状态，commentsLoaded 返回解析后的评论列表。
+    void fetchComments(const QString &videoId);
+
+    // 这是什么：发表当前登录用户的一条视频评论。
+    // 为什么能实现：从 DataCenter 读取用户身份，再把 videoId 和正文作为 JSON POST 给后端。
+    // 什么时候调用：评论窗口输入合法内容并点击发送时调用。
+    // 和谁配合：CommentDialog 收集正文，commentSent 返回后立即把新评论插到列表顶部。
+    void sendComment(const QString &videoId, const QString &content);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -216,6 +228,24 @@ signals:
     // 和谁配合：PlayerPage 记录日志，并继续正常播放。
     void watchProgressFailed(const QString &message);
 
+    // 这是什么：评论列表加载成功后的通知信号。
+    // 为什么能实现：Qt 信号槽可以把异步解析完成的 QList<CommentInfo> 交回界面。
+    // 什么时候触发：GET /videos/comments 返回 success=true 和有效评论数组后触发。
+    // 和谁配合：PlayerPage 转交给 CommentDialog 刷新列表。
+    void commentsLoaded(const QList<CommentInfo> &comments);
+
+    // 这是什么：发表评论成功后的通知信号。
+    // 为什么能实现：后端返回最终评论对象，页面无需自行拼接 id 和时间。
+    // 什么时候触发：POST /videos/comments 成功保存评论后触发。
+    // 和谁配合：CommentDialog 把新评论插入顶部并恢复发送按钮。
+    void commentSent(const CommentInfo &comment);
+
+    // 这是什么：评论读取或发送失败后的统一通知信号。
+    // 为什么能实现：网络错误、参数错误和后端拒绝都能归一成 message。
+    // 什么时候触发：fetchComments() 或 sendComment() 无法完成时触发。
+    // 和谁配合：CommentDialog 展示错误并恢复可操作状态，视频播放不受影响。
+    void commentRequestFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -276,6 +306,12 @@ private:
     // 什么时候使用：fetchWatchProgress() 和 saveWatchProgress() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 用内存保存 account + videoId 对应的秒数。
     QUrl m_watchProgressUrl = QUrl("http://127.0.0.1:8080/videos/watch-progress");
+
+    // 这是什么：当前评论列表和发表评论共用的接口地址。
+    // 为什么这样做：GET 表示读取集合，POST 表示向集合新增评论，符合当前项目的 REST 风格。
+    // 什么时候使用：fetchComments() 和 sendComment() 创建网络请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 提供同路径的内存评论接口。
+    QUrl m_commentsUrl = QUrl("http://127.0.0.1:8080/videos/comments");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

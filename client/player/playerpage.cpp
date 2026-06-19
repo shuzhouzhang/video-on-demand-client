@@ -3,6 +3,7 @@
 #include "playerpage.h"
 #include "apiclient.h"
 #include "bulletscreenitem.h"
+#include "commentdialog.h"
 #include "datacenter.h"
 #include "ui_playerpage.h"
 #include "util.h"
@@ -15,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QShortcut>
@@ -133,6 +135,7 @@ void PlayerPage::initUI(const QString &videoId,
 
     m_mpvPlayer = new MpvPlayer(ui->videoScreen, this);
     m_apiClient = new ApiClient(this);
+    m_commentDialog = new CommentDialog(this);
     m_watchProgressTimer = new QTimer(this);
     m_watchProgressTimer->setInterval(5000);
 
@@ -186,6 +189,51 @@ void PlayerPage::initUI(const QString &videoId,
         } else {
             m_apiClient->likeVideo(m_videoId);
         }
+    });
+
+    ui->commentBtn->setStyleSheet(R"(
+        QPushButton#commentBtn {
+            border: 1px solid #d7e0e7;
+            border-radius: 6px;
+            background: #ffffff;
+            color: #334155;
+        }
+        QPushButton#commentBtn:hover {
+            border-color: #26bff3;
+            color: #0ea5d7;
+            background: #f3fbfe;
+        }
+    )");
+    connect(ui->commentBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：打开当前视频评论窗口并刷新评论列表。
+        // 为什么能实现：PlayerPage 已保存 videoId，ApiClient 可据此查询该视频的全部评论。
+        // 什么时候调用：用户点击播放页“评论”按钮时调用。
+        // 和谁配合：CommentDialog 展示加载状态，commentsLoaded 返回后填充列表。
+        if (m_videoId.isEmpty()) {
+            LOG() << "评论加载失败：视频 id 为空";
+            return;
+        }
+
+        m_commentDialog->setLoading(true);
+        m_commentDialog->show();
+        m_commentDialog->raise();
+        m_commentDialog->activateWindow();
+        m_apiClient->fetchComments(m_videoId);
+    });
+
+    connect(m_commentDialog, &CommentDialog::submitRequested, this, [this](const QString &content) {
+        // 这是什么：发表评论前的登录检查和接口调用入口。
+        // 为什么能实现：DataCenter 集中保存当前用户，只有登录状态有效时才允许 ApiClient 携带身份发送。
+        // 什么时候调用：评论窗口校验正文通过并发出 submitRequested 时调用。
+        // 和谁配合：CommentDialog 收集正文，ApiClient::sendComment() 完成网络提交。
+        if (!DataCenter::instance().isLoggedIn()) {
+            m_commentDialog->showError(QStringLiteral("请先登录后再发表评论"));
+            QMessageBox::information(this, QStringLiteral("需要登录"), QStringLiteral("请先登录后再发表评论"));
+            return;
+        }
+
+        m_commentDialog->setSubmitting(true);
+        m_apiClient->sendComment(m_videoId, content);
     });
 
     connect(ui->speedBtn, &QPushButton::clicked, this, [this]() {
@@ -331,6 +379,29 @@ void PlayerPage::initUI(const QString &videoId,
     });
     connect(m_apiClient, &ApiClient::watchProgressFailed, this, [](const QString &message) {
         LOG() << "播放记录接口请求失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::commentsLoaded, this, [this](const QList<CommentInfo> &comments) {
+        // 这是什么：评论列表接口成功后的界面刷新。
+        // 为什么能实现：ApiClient 已把 JSON 数组解析成 CommentInfo 列表，窗口可直接渲染。
+        // 什么时候调用：GET /videos/comments 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：CommentDialog::setComments() 按接口顺序展示最新评论。
+        m_commentDialog->setComments(comments);
+    });
+    connect(m_apiClient, &ApiClient::commentSent, this, [this](const CommentInfo &comment) {
+        // 这是什么：发表评论成功后的页面收尾。
+        // 为什么能实现：接口返回完整评论对象，直接插到列表顶部即可立即反映保存结果。
+        // 什么时候调用：POST /videos/comments 成功后由 Qt 信号槽触发。
+        // 和谁配合：CommentDialog 清空输入、恢复按钮并显示最新评论。
+        m_commentDialog->prependComment(comment);
+        LOG() << "评论发送成功:" << comment.content;
+    });
+    connect(m_apiClient, &ApiClient::commentRequestFailed, this, [this](const QString &message) {
+        // 这是什么：评论接口失败后的局部错误处理。
+        // 为什么这样做：错误只显示在评论窗口中，不改变播放器、弹幕或点赞状态。
+        // 什么时候调用：评论 GET/POST 遇到网络或业务错误时调用。
+        // 和谁配合：CommentDialog 恢复控件并显示错误，用户可继续观看或重试。
+        m_commentDialog->showError(message);
+        LOG() << "评论接口请求失败:" << message;
     });
 
     if (!m_videoId.isEmpty()) {

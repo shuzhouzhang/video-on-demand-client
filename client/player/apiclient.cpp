@@ -555,3 +555,132 @@ void ApiClient::saveWatchProgress(const QString &videoId, int seconds)
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchComments(const QString &videoId)
+{
+    // 这是什么：准备一次 GET /videos/comments 请求。
+    // 为什么能实现：QUrlQuery 把 videoId 安全编码进 URL，后端据此筛选对应评论。
+    // 什么时候调用：评论窗口每次打开并需要刷新列表时调用。
+    // 和谁配合：commentsLoaded 把结果交给 CommentDialog，失败则发 commentRequestFailed。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit commentRequestFailed("视频 id 不能为空");
+        return;
+    }
+
+    QUrl url = m_commentsUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：把评论列表响应翻译成 QList<CommentInfo>。
+        // 为什么能实现：finished 时响应体已完整，每个 JSON 对象都能按固定字段转成 CommentInfo。
+        // 什么时候调用：Qt 事件循环收到 GET /videos/comments 完成信号时自动调用。
+        // 和谁配合：成功发 commentsLoaded，CommentDialog 按最新优先顺序渲染。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit commentRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit commentRequestFailed(obj["message"].toString("评论加载失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        QList<CommentInfo> comments;
+        const QJsonArray items = obj["comments"].toArray();
+        comments.reserve(items.size());
+        for (const QJsonValue &value : items) {
+            const QJsonObject item = value.toObject();
+            CommentInfo comment;
+            comment.id = item["id"].toString();
+            comment.videoId = item["videoId"].toString();
+            comment.userName = item["userName"].toString();
+            comment.account = item["account"].toString();
+            comment.content = item["content"].toString();
+            comment.createdAt = item["createdAt"].toString();
+            if (!comment.id.isEmpty() && !comment.content.isEmpty()) {
+                comments.append(comment);
+            }
+        }
+
+        emit commentsLoaded(comments);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::sendComment(const QString &videoId, const QString &content)
+{
+    // 这是什么：提交一条当前用户的视频评论。
+    // 为什么能实现：DataCenter 提供登录身份，QNetworkAccessManager::post() 把身份和正文作为 JSON 发送。
+    // 什么时候调用：CommentDialog 校验输入后发出 submitRequested 时调用。
+    // 和谁配合：mock/后端生成评论 id 和时间，commentSent 把完整评论交回窗口。
+    const QString trimmedVideoId = videoId.trimmed();
+    const QString trimmedContent = content.trimmed();
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    if (trimmedVideoId.isEmpty()) {
+        emit commentRequestFailed("视频 id 不能为空");
+        return;
+    }
+    if (!DataCenter::instance().isLoggedIn()) {
+        emit commentRequestFailed("请先登录后再发表评论");
+        return;
+    }
+    if (trimmedContent.isEmpty() || trimmedContent.size() > 200) {
+        emit commentRequestFailed("评论内容需为 1 到 200 个字符");
+        return;
+    }
+
+    QNetworkRequest request(m_commentsUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["videoId"] = trimmedVideoId;
+    payload["userName"] = currentUser.userName;
+    payload["account"] = currentUser.account;
+    payload["content"] = trimmedContent;
+
+    QNetworkReply *reply = m_networkManager->post(
+        request,
+        QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理发表评论接口的最终结果。
+        // 为什么能实现：后端成功响应包含完整 comment 对象，可直接转成页面需要的 CommentInfo。
+        // 什么时候调用：Qt 事件循环收到 POST /videos/comments 完成信号时自动调用。
+        // 和谁配合：成功发 commentSent，失败发 commentRequestFailed 并让窗口恢复发送按钮。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit commentRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit commentRequestFailed(obj["message"].toString("评论发送失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        const QJsonObject item = obj["comment"].toObject();
+        CommentInfo comment;
+        comment.id = item["id"].toString();
+        comment.videoId = item["videoId"].toString();
+        comment.userName = item["userName"].toString();
+        comment.account = item["account"].toString();
+        comment.content = item["content"].toString();
+        comment.createdAt = item["createdAt"].toString();
+        if (comment.id.isEmpty() || comment.content.isEmpty()) {
+            emit commentRequestFailed("评论响应缺少必要字段");
+        } else {
+            emit commentSent(comment);
+        }
+        reply->deleteLater();
+    });
+}

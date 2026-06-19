@@ -20,6 +20,7 @@ class QShowEvent;
 class QSlider;
 class QTimer;
 class ApiClient;
+class CommentDialog;
 struct VideoInfo;
 
 namespace Ui {
@@ -101,6 +102,7 @@ private:
     QSlider *m_volumeSlider = nullptr;
     QLabel *m_volumeValueLabel = nullptr;
     ApiClient *m_apiClient = nullptr;
+    CommentDialog *m_commentDialog = nullptr;
     MpvPlayer *m_mpvPlayer = nullptr;
     QTimer *m_watchProgressTimer = nullptr;
     bool m_isBarrageEnabled = true;

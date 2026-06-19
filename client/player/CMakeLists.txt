@@ -29,6 +29,7 @@ qt_add_executable(player
     videobox.h videobox.cpp videobox.ui
     datacenter.h datacenter.cpp
     bulletscreenitem.h bulletscreenitem.cpp
+    commentdialog.h commentdialog.cpp
     playerpage.h playerpage.cpp playerpage.ui
     login.h login.cpp login.ui
     uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui

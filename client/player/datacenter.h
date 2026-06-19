@@ -29,6 +29,19 @@ struct UserInfo {
     QString account;
 };
 
+// 这是什么：一条视频评论在客户端中的结构化数据。
+// 为什么这样做：把接口 JSON 翻译成固定字段后，评论窗口不需要直接处理原始 JSON。
+// 什么时候使用：ApiClient 拉取或发送评论成功后创建，CommentDialog 展示评论时读取。
+// 和谁配合：mock/后端提供字段，ApiClient 负责解析，CommentDialog 负责渲染。
+struct CommentInfo {
+    QString id;
+    QString videoId;
+    QString userName;
+    QString account;
+    QString content;
+    QString createdAt;
+};
+
 // 这是什么：把后端 /videos 返回的 JSON 响应解析成首页能使用的视频列表。
 // 为什么能实现：VideoInfo 字段和 mock/后端 JSON 字段一一对应，解析后页面不用再关心原始 JSON。
 // 什么时候调用：ApiClient 收到 QNetworkReply 响应体并确认网络请求成功后调用。

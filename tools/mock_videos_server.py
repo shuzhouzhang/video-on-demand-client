@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from datetime import datetime
 import json
 from urllib.parse import parse_qs, urlparse
 
@@ -46,6 +47,27 @@ BARRAGES = {
 
 VIDEO_LIKES = {}
 WATCH_PROGRESS = {}
+COMMENTS = {
+    "video-001": [
+        {
+            "id": "comment-002",
+            "videoId": "video-001",
+            "userName": "接口测试员",
+            "account": "tester-002",
+            "content": "评论列表接口已经成功返回啦",
+            "createdAt": "2026-06-20 10:20",
+        },
+        {
+            "id": "comment-001",
+            "videoId": "video-001",
+            "userName": "Mock 用户",
+            "account": "mock-user-001",
+            "content": "这是一条来自 mock server 的初始评论",
+            "createdAt": "2026-06-20 10:00",
+        },
+    ],
+    "video-002": [],
+}
 
 
 class MockVideosHandler(BaseHTTPRequestHandler):
@@ -85,6 +107,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_get_watch_progress(parsed_url.query)
             return
 
+        if path == "/videos/comments":
+            self.handle_get_comments(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -119,6 +145,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos/watch-progress":
             self.handle_save_watch_progress(payload)
+            return
+
+        if self.path == "/videos/comments":
+            self.handle_send_comment(payload)
             return
 
         self.send_response(404)
@@ -296,6 +326,55 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         WATCH_PROGRESS[(account, video_id)] = seconds
         self.write_json(200, {"success": True, "seconds": seconds, "message": "保存成功"})
 
+    def handle_get_comments(self, query):
+        # 这是什么：处理第一版视频评论列表接口 GET /videos/comments。
+        # 为什么能实现：COMMENTS 按 videoId 保存评论数组，查询时直接返回对应列表。
+        # 什么时候调用：用户打开播放页评论窗口，ApiClient::fetchComments() 发请求时调用。
+        # 和谁配合：ApiClient 把 JSON 数组解析成 CommentInfo，CommentDialog 按最新优先展示。
+        video_id = parse_qs(query).get("videoId", [""])[0].strip()
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+
+        self.write_json(200, {"success": True, "comments": COMMENTS.get(video_id, [])})
+
+    def handle_send_comment(self, payload):
+        # 这是什么：处理第一版发表评论接口 POST /videos/comments。
+        # 为什么能实现：校验登录身份和正文后，mock server 生成 id/时间并写入 COMMENTS 内存列表顶部。
+        # 什么时候调用：已登录用户在 CommentDialog 点击发送，ApiClient::sendComment() 发请求时调用。
+        # 和谁配合：返回完整 comment 对象，让 Qt 页面无需重新拉取即可立即显示。
+        video_id = str(payload.get("videoId", "")).strip()
+        user_name = str(payload.get("userName", "")).strip()
+        account = str(payload.get("account", "")).strip()
+        content = str(payload.get("content", "")).strip()
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+        if not account or not user_name:
+            self.write_json(200, {"success": False, "message": "请先登录后再发表评论"})
+            return
+        if not content or len(content) > 200:
+            self.write_json(200, {"success": False, "message": "评论内容需为 1 到 200 个字符"})
+            return
+
+        comment_count = sum(len(items) for items in COMMENTS.values())
+        comment = {
+            "id": f"comment-{comment_count + 1:03d}",
+            "videoId": video_id,
+            "userName": user_name,
+            "account": account,
+            "content": content,
+            "createdAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        COMMENTS.setdefault(video_id, []).insert(0, comment)
+        self.write_json(200, {"success": True, "message": "评论成功", "comment": comment})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -303,5 +382,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress mock endpoints")
+    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress/comments mock endpoints")
     server.serve_forever()
