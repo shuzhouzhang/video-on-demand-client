@@ -48,6 +48,8 @@ private:
     void onAuthcodeButtonClicked();
     void onLoginSucceeded(const QString &userName, const QString &account);
     void onLoginFailed(const QString &message);
+    void onEmailCodeSent(const QString &authcodeId, const QString &debugCode);
+    void onEmailCodeFailed(const QString &message);
     void switchMode(Mode mode);
     void clearInputs();
     void refreshModeButtons();
@@ -63,8 +65,6 @@ private:
     QLineEdit *m_authcodeEdit = nullptr;
     ApiClient *m_apiClient = nullptr;
     QString m_authcodeId;
-    QString m_authcodeValue;
-    QString m_authcodeEmail;
     Mode m_mode = Mode::Email;
     bool m_isLoginRequesting = false;
     bool m_isDragging = false;

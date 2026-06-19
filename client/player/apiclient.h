@@ -55,6 +55,18 @@ public:
     // 和谁配合：Login 负责收集输入和展示结果，ApiClient 负责发送请求并发出登录成功/失败信号。
     void login(const QString &account, const QString &password);
 
+    // 这是什么：向后端申请邮箱登录验证码。
+    // 为什么能实现：POST 邮箱后，后端创建验证码会话并返回 authcodeId；mock 额外返回测试验证码。
+    // 什么时候调用：邮箱格式校验通过并点击“获取验证码”时调用。
+    // 和谁配合：Login 保存 authcodeId，后续 emailLogin() 提交验证码。
+    void requestEmailCode(const QString &email);
+
+    // 这是什么：使用邮箱、验证码和验证码会话完成登录或首次注册。
+    // 为什么能实现：后端校验三者匹配后返回统一 userName/account 登录结果。
+    // 什么时候调用：邮箱登录表单校验通过并点击登录时调用。
+    // 和谁配合：复用 loginSucceeded/loginFailed，让 Login 后续流程保持一致。
+    void emailLogin(const QString &email, const QString &authcodeId, const QString &authcode);
+
     // 这是什么：请求真实视频文件上传接口。
     // 为什么能实现：把 UploadVideoInfo 拆成 JSON metadata、videoFile 和可选 coverFile multipart 部分。
     // 什么时候调用：上传页表单校验通过，并确认当前用户已登录后调用。
@@ -199,6 +211,18 @@ signals:
     // 什么时候触发：login() 请求失败、响应异常或账号密码不匹配时触发。
     // 和谁配合：Login 收到后恢复登录按钮并弹出提示。
     void loginFailed(const QString &message);
+
+    // 这是什么：邮箱验证码申请成功通知。
+    // 为什么能实现：后端返回 authcodeId，mock 环境同时返回 debugCode 方便手动联调。
+    // 什么时候触发：POST /login/email-code 成功后触发。
+    // 和谁配合：Login 保存会话 id、恢复按钮并向用户展示测试验证码。
+    void emailCodeSent(const QString &authcodeId, const QString &debugCode);
+
+    // 这是什么：邮箱验证码申请失败通知。
+    // 为什么能实现：格式错误、网络错误和后端拒绝统一转换成 message。
+    // 什么时候触发：requestEmailCode() 失败时触发。
+    // 和谁配合：Login 恢复“获取验证码”按钮并提示原因。
+    void emailCodeFailed(const QString &message);
 
     // 这是什么：上传视频元数据成功后的通知信号。
     // 为什么能实现：POST /videos 返回 success=true 时，ApiClient 可以把 message 交回上传页。
@@ -404,6 +428,8 @@ private:
     // 什么时候使用：login() 创建 POST /login 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 提供同路径的临时登录响应。
     QUrl m_loginUrl = QUrl("http://127.0.0.1:8080/login");
+    QUrl m_emailCodeUrl = QUrl("http://127.0.0.1:8080/login/email-code");
+    QUrl m_emailLoginUrl = QUrl("http://127.0.0.1:8080/login/email");
 
     // 这是什么：当前上传视频元数据接口地址。
     // 为什么这样做：第一版沿用 REST 风格，GET /videos 获取列表，POST /videos 发布新视频元数据。

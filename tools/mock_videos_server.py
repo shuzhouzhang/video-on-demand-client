@@ -4,6 +4,7 @@ from email.parser import BytesParser
 from email.policy import default
 import json
 from pathlib import Path
+import re
 import tempfile
 from urllib.parse import parse_qs, urlparse
 
@@ -54,6 +55,7 @@ BARRAGES = {
 VIDEO_LIKES = {}
 VIDEO_FAVORITES = {}
 WATCH_PROGRESS = {}
+EMAIL_CODES = {}
 COMMENTS = {
     "video-001": [
         {
@@ -164,6 +166,14 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_login(payload)
             return
 
+        if self.path == "/login/email-code":
+            self.handle_email_code(payload)
+            return
+
+        if self.path == "/login/email":
+            self.handle_email_login(payload)
+            return
+
         if self.path == "/videos":
             self.handle_upload_video(payload)
             return
@@ -216,6 +226,44 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             return
 
         self.write_json(200, {"success": True, "userName": user["userName"], "account": account})
+
+    def handle_email_code(self, payload):
+        # 这是什么：创建邮箱验证码登录会话。
+        # 为什么能实现：mock 按 authcodeId 保存邮箱和验证码，后续登录必须同时匹配。
+        # 什么时候调用：Qt 点击“获取验证码”并 POST /login/email-code 时调用。
+        # 和谁配合：debugCode 只供本地联调展示，真实后端应通过邮件发送而不返回明文。
+        email = str(payload.get("email", "")).strip().lower()
+        if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
+            self.write_json(200, {"success": False, "message": "邮箱格式错误"})
+            return
+        authcode_id = f"email-code-{len(EMAIL_CODES) + 1:03d}"
+        debug_code = "246810"
+        EMAIL_CODES[authcode_id] = {"email": email, "code": debug_code}
+        self.write_json(
+            200,
+            {"success": True, "message": "验证码已发送", "authcodeId": authcode_id, "debugCode": debug_code},
+        )
+
+    def handle_email_login(self, payload):
+        # 这是什么：校验邮箱验证码并完成登录或首次注册。
+        # 为什么能实现：authcodeId 定位服务端会话，再核对邮箱和验证码；成功后立即删除会话防止复用。
+        # 什么时候调用：Qt 邮箱登录表单 POST /login/email 时调用。
+        # 和谁配合：返回字段与密码登录一致，客户端可复用 loginSucceeded。
+        email = str(payload.get("email", "")).strip().lower()
+        authcode_id = str(payload.get("authcodeId", "")).strip()
+        authcode = str(payload.get("authcode", "")).strip()
+        code_session = EMAIL_CODES.get(authcode_id)
+        if code_session is None or code_session["email"] != email or code_session["code"] != authcode:
+            self.write_json(200, {"success": False, "message": "验证码错误或已失效"})
+            return
+        EMAIL_CODES.pop(authcode_id, None)
+        if email not in USERS:
+            USERS[email] = {
+                "password": "",
+                "userName": email.split("@", 1)[0],
+                "description": "",
+            }
+        self.write_json(200, {"success": True, "userName": USERS[email]["userName"], "account": email})
 
     def handle_upload_video(self, payload):
         # 这是什么：处理上传视频元数据接口 POST /videos。

@@ -156,6 +156,71 @@ void ApiClient::login(const QString &account, const QString &password)
     });
 }
 
+void ApiClient::requestEmailCode(const QString &email)
+{
+    // 这是什么：发送邮箱验证码申请请求。
+    // 为什么能实现：JSON POST 把邮箱交给后端，后端生成会话 id 和验证码。
+    // 什么时候调用：Login 完成邮箱格式校验后调用。
+    // 和谁配合：emailCodeSent/emailCodeFailed 把异步结果交回登录窗口。
+    QNetworkRequest request(m_emailCodeUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["email"] = email.trimmed();
+    QNetworkReply *reply = m_networkManager->post(
+        request,
+        QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit emailCodeFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString authcodeId = obj["authcodeId"].toString();
+        if (!obj["success"].toBool(false) || authcodeId.isEmpty()) {
+            emit emailCodeFailed(obj["message"].toString("验证码发送失败"));
+        } else {
+            emit emailCodeSent(authcodeId, obj["debugCode"].toString());
+        }
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::emailLogin(const QString &email,
+                           const QString &authcodeId,
+                           const QString &authcode)
+{
+    // 这是什么：提交邮箱验证码完成登录或首次注册。
+    // 为什么能实现：后端用 authcodeId 找到验证码会话，再核对邮箱和六位验证码。
+    // 什么时候调用：用户填写邮箱验证码并点击登录时调用。
+    // 和谁配合：成功复用 loginSucceeded，失败复用 loginFailed。
+    QNetworkRequest request(m_emailLoginUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["email"] = email.trimmed();
+    payload["authcodeId"] = authcodeId;
+    payload["authcode"] = authcode.trimmed();
+    QNetworkReply *reply = m_networkManager->post(
+        request,
+        QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit loginFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString userName = obj["userName"].toString();
+        const QString account = obj["account"].toString();
+        if (!obj["success"].toBool(false) || userName.isEmpty() || account.isEmpty()) {
+            emit loginFailed(obj["message"].toString("邮箱验证码登录失败"));
+        } else {
+            emit loginSucceeded(userName, account);
+        }
+        reply->deleteLater();
+    });
+}
+
 void ApiClient::uploadVideo(const UploadVideoInfo &info)
 {
     // 这是什么：使用 multipart/form-data 上传视频元数据和真实文件。

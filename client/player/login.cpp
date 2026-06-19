@@ -1,37 +1,22 @@
 // login.cpp 实现登录窗口流程。
-// 当前阶段密码登录接临时 /login 接口，邮箱验证码登录仍保留本地模拟。
+// 密码登录和邮箱验证码登录都通过 ApiClient 与 mock/后端联调。
 #include "login.h"
 #include "apiclient.h"
 #include "ui_login.h"
 #include "util.h"
 
 #include <QHBoxLayout>
-#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
-#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QVBoxLayout>
 
 namespace {
-struct AccountInfo {
-    QString nickname;
-    QString password;
-};
-
-QHash<QString, AccountInfo> &accountStore()
-{
-    static QHash<QString, AccountInfo> users = {
-        {"bit-user-001", {"BIT 用户", "bit123456"}},
-    };
-    return users;
-}
-
 QString accountRuleError(const QString &account)
 {
     if (account.isEmpty()) {
@@ -79,21 +64,6 @@ QString passwordRuleError(const QString &password)
     return {};
 }
 
-QString nicknameFromEmail(const QString &email)
-{
-    const int atIndex = email.indexOf('@');
-    if (atIndex <= 0) {
-        return email;
-    }
-
-    return email.left(atIndex);
-}
-
-QString makeAuthcode()
-{
-    const int value = QRandomGenerator::global()->bounded(0, 1000000);
-    return QString("%1").arg(value, 6, 10, QLatin1Char('0'));
-}
 }
 
 Login::Login(QWidget *parent)
@@ -227,6 +197,8 @@ void Login::initUI()
     connect(m_authcodeEdit, &QLineEdit::returnPressed, this, &Login::onLoginButtonClicked);
     connect(m_apiClient, &ApiClient::loginSucceeded, this, &Login::onLoginSucceeded);
     connect(m_apiClient, &ApiClient::loginFailed, this, &Login::onLoginFailed);
+    connect(m_apiClient, &ApiClient::emailCodeSent, this, &Login::onEmailCodeSent);
+    connect(m_apiClient, &ApiClient::emailCodeFailed, this, &Login::onEmailCodeFailed);
 
     setStyleSheet(R"(
         QWidget#Login {
@@ -361,22 +333,15 @@ void Login::onLoginButtonClicked()
             return;
         }
 
-        if (m_authcodeId.isEmpty() || email != m_authcodeEmail || authcode != m_authcodeValue) {
-            QMessageBox::warning(this, "邮箱登录", "验证码错误或已失效，请重新获取");
-            m_authcodeEdit->setFocus();
+        if (m_authcodeId.isEmpty()) {
+            QMessageBox::warning(this, "邮箱登录", "请先获取验证码");
             return;
         }
 
-        auto &users = accountStore();
-        if (!users.contains(email)) {
-            users.insert(email, {nicknameFromEmail(email), {}});
-            LOG() << "本地邮箱注册成功，邮箱:" << email;
-        }
-
-        const AccountInfo user = users.value(email);
-        LOG() << "本地邮箱登录成功，邮箱:" << email << "昵称:" << user.nickname;
-        emit loginSuccess(user.nickname, email);
-        close();
+        m_isLoginRequesting = true;
+        ui->loginBtn->setEnabled(false);
+        ui->loginBtn->setText("登录中...");
+        m_apiClient->emailLogin(email, m_authcodeId, authcode);
         return;
     }
 
@@ -429,8 +394,39 @@ void Login::onLoginFailed(const QString &message)
     m_isLoginRequesting = false;
     ui->loginBtn->setEnabled(true);
     ui->loginBtn->setText(m_mode == Mode::Email ? "登录/注册" : "登录");
-    QMessageBox::warning(this, "密码登录", message);
-    ui->passwordEdit->setFocus();
+    QMessageBox::warning(this, m_mode == Mode::Email ? "邮箱登录" : "密码登录", message);
+    if (m_mode == Mode::Email) {
+        m_authcodeEdit->setFocus();
+    } else {
+        ui->passwordEdit->setFocus();
+    }
+}
+
+void Login::onEmailCodeSent(const QString &authcodeId, const QString &debugCode)
+{
+    // 这是什么：邮箱验证码接口成功后的页面收尾。
+    // 为什么能实现：保存后端 authcodeId 后，登录提交可以引用同一次验证码会话。
+    // 什么时候调用：ApiClient::emailCodeSent 信号触发时调用。
+    // 和谁配合：mock 返回 debugCode 供当前开发环境手动验证。
+    m_authcodeId = authcodeId;
+    m_authcodeBtn->setEnabled(true);
+    m_authcodeBtn->setText("重新获取");
+    m_authcodeEdit->clear();
+    m_authcodeEdit->setFocus();
+    QMessageBox::information(this,
+                             "获取验证码",
+                             debugCode.isEmpty() ? "验证码已发送" : "测试验证码：" + debugCode);
+}
+
+void Login::onEmailCodeFailed(const QString &message)
+{
+    // 这是什么：验证码申请失败后的页面恢复。
+    // 为什么能实现：重新启用按钮后用户可以修正邮箱或重试网络请求。
+    // 什么时候调用：ApiClient::emailCodeFailed 信号触发时调用。
+    // 和谁配合：QMessageBox 展示后端/网络错误。
+    m_authcodeBtn->setEnabled(true);
+    m_authcodeBtn->setText("获取验证码");
+    QMessageBox::warning(this, "获取验证码", message);
 }
 
 void Login::onRegisterButtonClicked()
@@ -455,14 +451,10 @@ void Login::onAuthcodeButtonClicked()
         return;
     }
 
-    m_authcodeEmail = email;
-    m_authcodeValue = makeAuthcode();
-    m_authcodeId = QString("local-%1").arg(QRandomGenerator::global()->generate());
-    m_authcodeEdit->clear();
-    m_authcodeEdit->setFocus();
-
-    LOG() << "本地验证码已生成:" << email << m_authcodeValue << m_authcodeId;
-    QMessageBox::information(this, "获取验证码", "本地验证码：" + m_authcodeValue);
+    m_authcodeId.clear();
+    m_authcodeBtn->setEnabled(false);
+    m_authcodeBtn->setText("发送中...");
+    m_apiClient->requestEmailCode(email);
 }
 
 void Login::switchMode(Mode mode)
@@ -508,8 +500,6 @@ void Login::clearInputs()
     m_emailEdit->clear();
     m_authcodeEdit->clear();
     m_authcodeId.clear();
-    m_authcodeValue.clear();
-    m_authcodeEmail.clear();
 }
 
 void Login::refreshModeButtons()

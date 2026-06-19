@@ -444,6 +444,53 @@ def main():
 
         print("OK: /login communication test passed")
 
+        email_code = post_json(
+            f"{base_url}/login/email-code",
+            {"email": "new-user@example.com"},
+        )
+        assert email_code["success"] is True, "email code request should succeed"
+        assert email_code["authcodeId"], "email code response should include session id"
+        assert email_code["debugCode"] == "246810", "mock should expose deterministic test code"
+
+        wrong_email_login = post_json(
+            f"{base_url}/login/email",
+            {
+                "email": "new-user@example.com",
+                "authcodeId": email_code["authcodeId"],
+                "authcode": "000000",
+            },
+        )
+        assert wrong_email_login["success"] is False, "wrong email code should fail"
+
+        email_login = post_json(
+            f"{base_url}/login/email",
+            {
+                "email": "new-user@example.com",
+                "authcodeId": email_code["authcodeId"],
+                "authcode": email_code["debugCode"],
+            },
+        )
+        assert email_login["success"] is True, "valid email code should login"
+        assert email_login["account"] == "new-user@example.com", "email login should return account"
+
+        reused_email_code = post_json(
+            f"{base_url}/login/email",
+            {
+                "email": "new-user@example.com",
+                "authcodeId": email_code["authcodeId"],
+                "authcode": email_code["debugCode"],
+            },
+        )
+        assert reused_email_code["success"] is False, "email code should be single-use"
+
+        invalid_email_code = post_json(
+            f"{base_url}/login/email-code",
+            {"email": "not-an-email"},
+        )
+        assert invalid_email_code["success"] is False, "invalid email should fail"
+
+        print("OK: email login communication test passed")
+
         upload_success = post_json(
             f"{base_url}/videos",
             {
