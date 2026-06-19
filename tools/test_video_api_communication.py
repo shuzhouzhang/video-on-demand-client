@@ -200,6 +200,36 @@ def main():
 
         print("OK: /videos/comments communication test passed")
 
+        with urllib.request.urlopen(
+            f"{base_url}/videos/search?keyword=Mock",
+            timeout=3,
+        ) as response:
+            title_search = json.loads(response.read().decode("utf-8"))
+        assert title_search["success"] is True, "title search should succeed"
+        assert len(title_search["videos"]) == 2, "Mock should match both seeded video titles"
+
+        with urllib.request.urlopen(
+            f"{base_url}/videos/search?keyword=%E7%BC%96%E7%A8%8B%E5%BC%80%E5%8F%91",
+            timeout=3,
+        ) as response:
+            tag_search = json.loads(response.read().decode("utf-8"))
+        assert tag_search["success"] is True, "tag search should succeed"
+        assert [video["id"] for video in tag_search["videos"]] == ["video-001"], "tag search should match video-001"
+
+        with urllib.request.urlopen(
+            f"{base_url}/videos/search?keyword=not-found-keyword",
+            timeout=3,
+        ) as response:
+            empty_search = json.loads(response.read().decode("utf-8"))
+        assert empty_search["success"] is True, "empty search result is still a successful request"
+        assert empty_search["videos"] == [], "unknown keyword should return empty list"
+
+        with urllib.request.urlopen(f"{base_url}/videos/search", timeout=3) as response:
+            missing_search = json.loads(response.read().decode("utf-8"))
+        assert missing_search["success"] is False, "search should fail without keyword"
+
+        print("OK: /videos/search communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

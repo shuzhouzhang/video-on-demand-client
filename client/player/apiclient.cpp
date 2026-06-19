@@ -684,3 +684,56 @@ void ApiClient::sendComment(const QString &videoId, const QString &content)
         reply->deleteLater();
     });
 }
+
+void ApiClient::searchVideos(const QString &keyword)
+{
+    // 这是什么：准备一次带 keyword 参数的视频搜索 GET 请求。
+    // 为什么能实现：QUrlQuery 会安全编码关键词，mock/后端按同名参数执行匹配。
+    // 什么时候调用：首页搜索按钮或搜索框回车触发时调用。
+    // 和谁配合：searchResultsLoaded 把结果交给 player.cpp，searchFailed 保留当前列表。
+    const QString trimmedKeyword = keyword.trimmed();
+    if (trimmedKeyword.isEmpty()) {
+        emit searchFailed("搜索关键词不能为空");
+        return;
+    }
+
+    QUrl url = m_searchUrl;
+    QUrlQuery query;
+    query.addQueryItem("keyword", trimmedKeyword);
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理搜索响应并把视频 JSON 数组转换成 VideoInfo 列表。
+        // 为什么能实现：搜索接口沿用 /videos 相同字段，可复用 videoInfoFromJsonObject() 的解析规则。
+        // 什么时候调用：Qt 收到 GET /videos/search 完成信号时自动调用。
+        // 和谁配合：成功发 searchResultsLoaded，页面用原有 VideoBox 展示；失败发 searchFailed。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit searchFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit searchFailed(obj["message"].toString("视频搜索失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        QList<VideoInfo> videos;
+        const QJsonArray items = obj["videos"].toArray();
+        videos.reserve(items.size());
+        for (const QJsonValue &value : items) {
+            const VideoInfo video = videoInfoFromJsonObject(value.toObject());
+            if (!video.id.isEmpty() && !video.title.isEmpty()) {
+                videos.append(video);
+            }
+        }
+
+        emit searchResultsLoaded(videos);
+        reply->deleteLater();
+    });
+}

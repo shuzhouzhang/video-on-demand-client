@@ -119,6 +119,12 @@ public:
     // 和谁配合：CommentDialog 收集正文，commentSent 返回后立即把新评论插到列表顶部。
     void sendComment(const QString &videoId, const QString &content);
 
+    // 这是什么：按关键词请求视频搜索结果。
+    // 为什么能实现：把关键词作为 GET 查询参数发送，后端可在标题、作者、分类、标签和简介中匹配。
+    // 什么时候调用：用户在首页输入非空关键词并点击搜索或按回车时调用。
+    // 和谁配合：player.cpp 负责输入和渲染，searchResultsLoaded 返回可为空的视频列表。
+    void searchVideos(const QString &keyword);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -246,6 +252,18 @@ signals:
     // 和谁配合：CommentDialog 展示错误并恢复可操作状态，视频播放不受影响。
     void commentRequestFailed(const QString &message);
 
+    // 这是什么：视频搜索成功后的结果信号。
+    // 为什么能实现：ApiClient 把后端 JSON 数组转成 QList<VideoInfo>，页面可复用现有 VideoBox 渲染流程。
+    // 什么时候触发：GET /videos/search 返回 success=true 时触发，零条结果也属于成功。
+    // 和谁配合：player.cpp 更新 m_homeVideos，并继续应用当前分类和标签筛选。
+    void searchResultsLoaded(const QList<VideoInfo> &videos);
+
+    // 这是什么：视频搜索失败后的通知信号。
+    // 为什么能实现：网络错误、空关键词和后端业务错误都会转成统一 message。
+    // 什么时候触发：searchVideos() 无法得到有效响应时触发。
+    // 和谁配合：player.cpp 恢复搜索按钮并保留搜索前的视频列表。
+    void searchFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -312,6 +330,12 @@ private:
     // 什么时候使用：fetchComments() 和 sendComment() 创建网络请求时使用。
     // 和谁配合：tools/mock_videos_server.py 提供同路径的内存评论接口。
     QUrl m_commentsUrl = QUrl("http://127.0.0.1:8080/videos/comments");
+
+    // 这是什么：当前视频搜索接口地址。
+    // 为什么这样做：搜索是读取操作，使用 GET 并通过 keyword 查询参数表达条件。
+    // 什么时候使用：searchVideos() 创建网络请求时使用。
+    // 和谁配合：tools/mock_videos_server.py 的 GET /videos/search。
+    QUrl m_searchUrl = QUrl("http://127.0.0.1:8080/videos/search");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

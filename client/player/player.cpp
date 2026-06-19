@@ -341,6 +341,14 @@ void player::renderHomeVideos()
         ui->videoScrollLayout->addWidget(videoBox, visibleIndex / 4, visibleIndex % 4);
         ++visibleIndex;
     }
+
+    if (visibleIndex == 0) {
+        auto *emptyLabel = new QLabel(QStringLiteral("没有找到相关视频"), ui->videoScrollContents);
+        emptyLabel->setAlignment(Qt::AlignCenter);
+        emptyLabel->setMinimumSize(520, 120);
+        emptyLabel->setStyleSheet(QStringLiteral("color: #94a3b8; font-size: 16px;"));
+        ui->videoScrollLayout->addWidget(emptyLabel, 0, 0, 1, 4);
+    }
 }
 
 void player::setHomeVideos(const QList<VideoInfo> &videos)
@@ -354,8 +362,35 @@ void player::setHomeVideos(const QList<VideoInfo> &videos)
     }
 
     DataCenter::instance().setHomeVideos(videos);
-    m_homeVideos = DataCenter::instance().homeVideos();
-    renderHomeVideos();
+    if (m_searchKeyword.isEmpty()) {
+        m_homeVideos = DataCenter::instance().homeVideos();
+        renderHomeVideos();
+    }
+}
+
+void player::searchHomeVideos()
+{
+    // 这是什么：首页搜索操作的统一入口。
+    // 为什么能实现：空关键词直接恢复 DataCenter 全量列表，非空关键词交给 ApiClient 异步查询。
+    // 什么时候调用：用户点击搜索按钮或在搜索框按回车时调用。
+    // 和谁配合：searchResultsLoaded 更新页面缓存，renderHomeVideos() 继续应用分类和标签条件。
+    if (!ui->searchBtn->isEnabled()) {
+        return;
+    }
+
+    const QString keyword = ui->searchEdit->text().trimmed();
+    if (keyword.isEmpty()) {
+        m_searchKeyword.clear();
+        m_homeVideos = DataCenter::instance().homeVideos();
+        renderHomeVideos();
+        LOG() << "清空搜索，恢复全部视频";
+        return;
+    }
+
+    m_searchKeyword = keyword;
+    ui->searchBtn->setEnabled(false);
+    ui->searchBtn->setText(QStringLiteral("搜索中..."));
+    m_apiClient->searchVideos(keyword);
 }
 
 void player::initUI()
@@ -424,6 +459,26 @@ void player::initUI()
     connect(m_apiClient, &ApiClient::requestFailed, this, [this](const QString &message) {
         LOG() << "首页视频接口请求失败，继续使用本地兜底数据:" << message;
     });
+    connect(m_apiClient, &ApiClient::searchResultsLoaded, this, [this](const QList<VideoInfo> &videos) {
+        // 这是什么：首页接收搜索结果并刷新卡片。
+        // 为什么能实现：搜索接口返回与首页列表相同的 VideoInfo，现有渲染函数可以直接复用。
+        // 什么时候调用：GET /videos/search 成功后由 Qt 信号槽触发，包括零条结果。
+        // 和谁配合：renderHomeVideos() 同时应用当前分类、标签和搜索结果。
+        m_homeVideos = videos;
+        ui->searchBtn->setEnabled(true);
+        ui->searchBtn->setText(QStringLiteral("搜索"));
+        renderHomeVideos();
+        LOG() << "视频搜索完成:" << m_searchKeyword << "结果数:" << videos.size();
+    });
+    connect(m_apiClient, &ApiClient::searchFailed, this, [this](const QString &message) {
+        // 这是什么：首页搜索失败后的恢复逻辑。
+        // 为什么这样做：请求失败不应清空用户当前看到的视频，只需恢复按钮并允许重试。
+        // 什么时候调用：搜索网络错误或后端返回 success=false 时调用。
+        // 和谁配合：ApiClient 提供错误信息，首页保留原 m_homeVideos。
+        ui->searchBtn->setEnabled(true);
+        ui->searchBtn->setText(QStringLiteral("搜索"));
+        LOG() << "视频搜索失败，保留当前列表:" << message;
+    });
     m_apiClient->fetchVideos();
 
     auto switchNavButton = [this](int index) {
@@ -475,9 +530,8 @@ void player::initUI()
     ui->quitBtn->raise();
     connect(ui->minBtn, &QPushButton::clicked, this, &QWidget::showMinimized);
     connect(ui->quitBtn, &QPushButton::clicked, this, &QWidget::close);
-    connect(ui->searchBtn, &QPushButton::clicked, this, [this]() {
-        LOG() << "点击搜索按钮，关键词:" << ui->searchEdit->text();
-    });
+    connect(ui->searchBtn, &QPushButton::clicked, this, &player::searchHomeVideos);
+    connect(ui->searchEdit, &QLineEdit::returnPressed, this, &player::searchHomeVideos);
     connect(ui->myAvatarBtn, &QPushButton::clicked, this, [this, setMyAvatar]() {
         if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();

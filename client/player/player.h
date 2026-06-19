@@ -48,6 +48,7 @@ private:
     void refreshHomeTagButtons();
     void renderHomeVideos();
     void setHomeVideos(const QList<VideoInfo> &videos);
+    void searchHomeVideos();
     void selectHomeCategory(const QString &category);
     void clearLayout(QLayout *layout);
     void showLoginWindow();
@@ -69,6 +70,7 @@ private:
     QList<VideoInfo> m_homeVideos;
     QString m_selectedCategory;
     QString m_selectedTag;
+    QString m_searchKeyword;
     QList<QPushButton *> m_categoryButtons;
     QList<QPushButton *> m_tagButtons;
 };

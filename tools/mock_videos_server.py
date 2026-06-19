@@ -111,6 +111,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_get_comments(parsed_url.query)
             return
 
+        if path == "/videos/search":
+            self.handle_search_videos(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -375,6 +379,33 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         COMMENTS.setdefault(video_id, []).insert(0, comment)
         self.write_json(200, {"success": True, "message": "评论成功", "comment": comment})
 
+    def handle_search_videos(self, query):
+        # 这是什么：处理第一版视频搜索接口 GET /videos/search。
+        # 为什么能实现：把关键词转成小写后，在标题、作者、分类、标签和简介拼成的文本中匹配。
+        # 什么时候调用：Qt 首页通过 ApiClient::searchVideos() 提交非空关键词时调用。
+        # 和谁配合：返回字段与 /videos 一致，player.cpp 可继续用 VideoBox 展示结果。
+        keyword = parse_qs(query).get("keyword", [""])[0].strip()
+        if not keyword:
+            self.write_json(200, {"success": False, "message": "搜索关键词不能为空"})
+            return
+
+        normalized_keyword = keyword.casefold()
+        matched_videos = []
+        for video in VIDEOS:
+            searchable_text = " ".join(
+                [
+                    str(video.get("title", "")),
+                    str(video.get("userName", "")),
+                    str(video.get("category", "")),
+                    " ".join(video.get("tags", [])),
+                    str(video.get("description", "")),
+                ]
+            ).casefold()
+            if normalized_keyword in searchable_text:
+                matched_videos.append(video)
+
+        self.write_json(200, {"success": True, "videos": matched_videos})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -382,5 +413,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress/comments mock endpoints")
+    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress/comments/search mock endpoints")
     server.serve_forever()
