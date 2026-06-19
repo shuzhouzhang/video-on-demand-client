@@ -259,13 +259,22 @@ void ApiClient::uploadVideo(const UploadVideoInfo &info)
     });
 }
 
-void ApiClient::fetchPlayUrl()
+void ApiClient::fetchPlayUrl(const QString &videoId)
 {
-    // 这是什么：描述一次 GET /videos/play-url 请求。
-    // 为什么能实现：QNetworkRequest 保存播放地址接口 URL，QNetworkAccessManager 负责异步发送 GET。
+    // 这是什么：按 videoId 请求对应视频的播放地址。
+    // 为什么能实现：QUrlQuery 把视频标识传给后端，避免所有卡片共用一个无法区分的固定请求。
     // 什么时候调用：PlayerPage 初始化播放器后，需要从接口获取播放地址时调用。
     // 和谁配合：m_playUrlUrl 指向 mock server 或真实后端的播放地址接口。
-    QNetworkRequest request(m_playUrlUrl);
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit playUrlFailed("视频 id 不能为空");
+        return;
+    }
+    QUrl url = m_playUrlUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    url.setQuery(query);
+    QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     // 这是什么：真正发起播放地址请求。
@@ -300,14 +309,22 @@ void ApiClient::fetchPlayUrl()
     });
 }
 
-void ApiClient::fetchBarrages(const QString &videoKey)
+void ApiClient::fetchBarrages(const QString &videoId)
 {
-    // 这是什么：描述一次 GET /videos/barrages 请求。
-    // 为什么能实现：第一版 mock 弹幕接口暂不依赖 query 参数，播放页只需请求固定地址即可拿到测试弹幕。
-    // 什么时候调用：播放页确定 m_videoKey 后调用。
+    // 这是什么：按 videoId 请求当前视频弹幕。
+    // 为什么能实现：后端按视频 id 隔离弹幕集合，不同视频不会互相串数据。
+    // 什么时候调用：播放页确定 m_videoId 后调用。
     // 和谁配合：返回的弹幕按秒数整理后交给 PlayerPage/DataCenter。
-    Q_UNUSED(videoKey);
-    QNetworkRequest request(m_barragesUrl);
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit barrageRequestFailed("视频 id 不能为空");
+        return;
+    }
+    QUrl url = m_barragesUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    url.setQuery(query);
+    QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = m_networkManager->get(request);
@@ -346,18 +363,22 @@ void ApiClient::fetchBarrages(const QString &videoKey)
     });
 }
 
-void ApiClient::sendBarrage(const QString &videoKey, int seconds, const QString &text)
+void ApiClient::sendBarrage(const QString &videoId, int seconds, const QString &text)
 {
     // 这是什么：描述一次 POST /videos/barrages 请求。
-    // 为什么能实现：发送弹幕只需要 videoKey、seconds、text 和用户信息，JSON POST 足够完成第一版联调。
+    // 为什么能实现：发送弹幕只需要 videoId、seconds、text 和用户信息，JSON POST 可写入对应视频集合。
     // 什么时候调用：播放页确认弹幕文本非空且秒数合法后调用。
     // 和谁配合：DataCenter 提供当前用户，mock server 保存弹幕并返回最终文本。
+    if (videoId.trimmed().isEmpty()) {
+        emit barrageRequestFailed("视频 id 不能为空");
+        return;
+    }
     QNetworkRequest request(m_barragesUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     const UserInfo currentUser = DataCenter::instance().currentUser();
     QJsonObject payload;
-    payload["videoKey"] = videoKey;
+    payload["videoId"] = videoId.trimmed();
     payload["seconds"] = seconds;
     payload["text"] = text;
     payload["userName"] = currentUser.userName;
@@ -465,6 +486,45 @@ void ApiClient::unlikeVideo(const QString &videoId)
     // 什么时候调用：播放页点赞按钮处于已点赞状态时调用。
     // 和谁配合：sendVideoLikeRequest() 发请求，PlayerPage 接收 videoLikeChanged 后更新 UI。
     sendVideoLikeRequest(m_unlikeUrl, videoId);
+}
+
+void ApiClient::fetchVideoLikeStatus(const QString &videoId)
+{
+    // 这是什么：读取当前账号对视频的初始点赞状态和点赞数。
+    // 为什么能实现：mock/后端按 account + videoId 查询关系，并从视频数据读取 likeCount。
+    // 什么时候调用：播放页初始化时调用一次。
+    // 和谁配合：videoLikeStatusLoaded 让 PlayerPage 正确初始化点赞按钮，而非总是假设未点赞。
+    const QString trimmedVideoId = videoId.trimmed();
+    if (trimmedVideoId.isEmpty()) {
+        emit videoLikeFailed("视频 id 不能为空");
+        return;
+    }
+    const UserInfo user = DataCenter::instance().currentUser();
+    QUrl url = m_likeStatusUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    query.addQueryItem("account", user.account.isEmpty() ? QStringLiteral("guest") : user.account);
+    url.setQuery(query);
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // 这是什么：处理点赞状态查询响应。
+        // 为什么能实现：响应中的 liked/likeCount 就是页面初始化所需的完整状态。
+        // 什么时候调用：GET /videos/like-status 完成后由 Qt 自动调用。
+        // 和谁配合：PlayerPage 收到信号后更新 m_isLiked、按钮和数量。
+        if (reply->error() != QNetworkReply::NoError) {
+            emit videoLikeFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString likeCount = obj["likeCount"].toString();
+        if (!obj["success"].toBool(false) || likeCount.isEmpty()) {
+            emit videoLikeFailed(obj["message"].toString("点赞状态加载失败"));
+        } else {
+            emit videoLikeStatusLoaded(obj["liked"].toBool(false), likeCount);
+        }
+        reply->deleteLater();
+    });
 }
 
 void ApiClient::sendVideoLikeRequest(const QUrl &url, const QString &videoId)

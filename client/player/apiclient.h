@@ -65,19 +65,19 @@ public:
     // 为什么能实现：mock/后端提供 GET /videos/play-url，返回 JSON 里的 playUrl 字段给播放器使用。
     // 什么时候调用：播放页初始化 mpv 后，需要拿到真实播放地址时调用。
     // 和谁配合：PlayerPage 收到 playUrlLoaded 后调用 MpvPlayer::startPlay()。
-    void fetchPlayUrl();
+    void fetchPlayUrl(const QString &videoId);
 
     // 这是什么：请求当前视频的弹幕列表。
     // 为什么能实现：mock/后端提供 GET /videos/barrages，返回每条弹幕的秒数和文本。
-    // 什么时候调用：播放页拿到 m_videoKey 并准备播放后调用。
+    // 什么时候调用：播放页拿到 m_videoId 并准备播放后调用。
     // 和谁配合：PlayerPage 收到 barragesLoaded 后写入 DataCenter，并按播放时间显示。
-    void fetchBarrages(const QString &videoKey);
+    void fetchBarrages(const QString &videoId);
 
     // 这是什么：发送当前视频的一条弹幕。
-    // 为什么能实现：把 videoKey、seconds、text 和当前用户信息组装成 JSON，POST 到 /videos/barrages。
+    // 为什么能实现：把 videoId、seconds、text 和当前用户信息组装成 JSON，POST 到 /videos/barrages。
     // 什么时候调用：用户在播放页输入弹幕并点击发送或按回车时调用。
     // 和谁配合：PlayerPage 负责输入校验和成功后的立即显示。
-    void sendBarrage(const QString &videoKey, int seconds, const QString &text);
+    void sendBarrage(const QString &videoId, int seconds, const QString &text);
 
     // 这是什么：请求某个视频的详情信息。
     // 为什么能实现：播放页已经从首页卡片拿到 videoId，ApiClient 可以把它作为 query 参数请求 /videos/detail。
@@ -96,6 +96,12 @@ public:
     // 什么时候调用：用户在播放页点击已点赞状态的点赞按钮时调用。
     // 和谁配合：PlayerPage 收到 videoLikeChanged 后恢复按钮状态并更新点赞数。
     void unlikeVideo(const QString &videoId);
+
+    // 这是什么：查询当前账号对视频的初始点赞状态和点赞数。
+    // 为什么能实现：后端按 account + videoId 查询点赞关系，并返回 liked/likeCount。
+    // 什么时候调用：播放页打开并拿到 videoId 后调用。
+    // 和谁配合：PlayerPage 收到 videoLikeStatusLoaded 后初始化按钮和数量。
+    void fetchVideoLikeStatus(const QString &videoId);
 
     // 这是什么：请求当前视频的上次播放进度。
     // 为什么能实现：播放页已经持有 videoId，ApiClient 可带上当前账号请求 /videos/watch-progress。
@@ -214,13 +220,13 @@ signals:
 
     // 这是什么：播放地址接口成功后的通知信号。
     // 为什么能实现：GET /videos/play-url 返回 success=true 和 playUrl 后，ApiClient 可以把地址交给播放页。
-    // 什么时候触发：fetchPlayUrl() 收到非空 playUrl 后触发。
+    // 什么时候触发：fetchPlayUrl(videoId) 收到非空 playUrl 后触发。
     // 和谁配合：PlayerPage 用 playUrl 启动 MpvPlayer 播放。
     void playUrlLoaded(const QString &playUrl);
 
     // 这是什么：播放地址接口失败后的通知信号。
     // 为什么能实现：网络错误、JSON 异常、success=false 或 playUrl 为空都会转成失败消息。
-    // 什么时候触发：fetchPlayUrl() 无法拿到可播放地址时触发。
+    // 什么时候触发：fetchPlayUrl(videoId) 无法拿到可播放地址时触发。
     // 和谁配合：PlayerPage 收到后回退到本地 test.mp4。
     void playUrlFailed(const QString &message);
 
@@ -259,6 +265,12 @@ signals:
     // 什么时候触发：likeVideo() 或 unlikeVideo() 收到成功响应后触发。
     // 和谁配合：PlayerPage 用 liked 更新按钮样式，用 likeCount 更新点赞数文本。
     void videoLikeChanged(bool liked, const QString &likeCount);
+
+    // 这是什么：视频初始点赞状态加载成功后的通知。
+    // 为什么能实现：状态接口返回 liked 和 likeCount，页面可直接采用最终值。
+    // 什么时候触发：fetchVideoLikeStatus() 成功后触发。
+    // 和谁配合：PlayerPage 初始化 m_isLiked、点赞按钮和数量。
+    void videoLikeStatusLoaded(bool liked, const QString &likeCount);
 
     // 这是什么：点赞接口失败后的通知信号。
     // 为什么能实现：网络错误、缺少 videoId 或后端返回失败都会统一转成 message。
@@ -434,6 +446,12 @@ private:
     // 什么时候使用：unlikeVideo() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 在内存中移除用户点赞状态。
     QUrl m_unlikeUrl = QUrl("http://127.0.0.1:8080/videos/unlike");
+
+    // 这是什么：当前用户对视频点赞状态的查询地址。
+    // 为什么这样做：查询关系是读取操作，和点赞/取消点赞 POST 分开。
+    // 什么时候使用：fetchVideoLikeStatus() 创建 GET 请求时使用。
+    // 和谁配合：mock server 的 GET /videos/like-status。
+    QUrl m_likeStatusUrl = QUrl("http://127.0.0.1:8080/videos/like-status");
 
     // 这是什么：当前播放记录接口地址。
     // 为什么这样做：第一版 GET/POST 共用 /videos/watch-progress，分别负责读取和保存进度。

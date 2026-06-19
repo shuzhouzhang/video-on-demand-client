@@ -1,5 +1,5 @@
 // uploadvideopage.cpp 实现上传视频页面流程。
-// 当前阶段选择本地文件并把视频元数据提交到临时上传接口，不传真实视频二进制。
+// 上传页选择本地视频和封面，并通过 multipart 接口发送元数据与真实文件。
 #include "uploadvideopage.h"
 #include "apiclient.h"
 #include "datacenter.h"

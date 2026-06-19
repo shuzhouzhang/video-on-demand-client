@@ -113,6 +113,15 @@ def main():
         assert like_success["liked"] is True, "like should mark video as liked"
         assert like_success["likeCount"] == "257", "like should increase like count once"
 
+        with urllib.request.urlopen(
+            f"{base_url}/videos/like-status?videoId=video-001&account=bit-user-001",
+            timeout=3,
+        ) as response:
+            liked_status = json.loads(response.read().decode("utf-8"))
+        assert liked_status["success"] is True, "like status should load"
+        assert liked_status["liked"] is True, "like status should reflect saved relationship"
+        assert liked_status["likeCount"] == "257", "like status should return current count"
+
         like_repeat = post_json(
             f"{base_url}/videos/like",
             {"videoId": "video-001", "account": "bit-user-001"},
@@ -368,16 +377,20 @@ def main():
 
         print("OK: /users/profile communication test passed")
 
-        with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
+        with urllib.request.urlopen(f"{base_url}/videos/play-url?videoId=video-001", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)
 
         assert play_url["success"] is True, "play-url should succeed"
         assert play_url["playUrl"], "play-url should return non-empty playUrl"
 
+        with urllib.request.urlopen(f"{base_url}/videos/play-url?videoId=missing", timeout=3) as response:
+            missing_play_url = json.loads(response.read().decode("utf-8"))
+        assert missing_play_url["success"] is False, "play-url should fail for missing video"
+
         print("OK: /videos/play-url communication test passed")
 
-        with urllib.request.urlopen(f"{base_url}/videos/barrages", timeout=3) as response:
+        with urllib.request.urlopen(f"{base_url}/videos/barrages?videoId=video-001", timeout=3) as response:
             barrage_body = response.read().decode("utf-8")
             barrage_list = json.loads(barrage_body)
 
@@ -387,7 +400,7 @@ def main():
         barrage_send_success = post_json(
             f"{base_url}/videos/barrages",
             {
-                "videoKey": "D:/video-on-demand-client/test.mp4",
+                "videoId": "video-001",
                 "seconds": 5,
                 "text": "测试发送弹幕",
                 "userName": "BIT 用户",
@@ -400,12 +413,17 @@ def main():
         barrage_send_empty = post_json(
             f"{base_url}/videos/barrages",
             {
-                "videoKey": "D:/video-on-demand-client/test.mp4",
+                "videoId": "video-001",
                 "seconds": 5,
                 "text": "",
             },
         )
         assert barrage_send_empty["success"] is False, "empty barrage should fail"
+
+        with urllib.request.urlopen(f"{base_url}/videos/barrages?videoId=video-002", timeout=3) as response:
+            second_video_barrages = json.loads(response.read().decode("utf-8"))
+        assert second_video_barrages["success"] is True, "second video barrages should load"
+        assert second_video_barrages["barrages"] == [], "video-001 barrage must not leak to video-002"
 
         print("OK: /videos/barrages communication test passed")
 

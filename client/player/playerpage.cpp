@@ -324,7 +324,7 @@ void PlayerPage::initUI(const QString &videoId,
         // 什么时候调用：GET /videos/play-url 成功返回时由 Qt 信号槽触发。
         // 和谁配合：ApiClient 负责请求地址，startPlayback() 负责统一设置 m_videoKey 并启动播放器。
         startPlayback(playUrl);
-        m_apiClient->fetchBarrages(m_videoKey);
+        m_apiClient->fetchBarrages(m_videoId);
     });
     connect(m_apiClient, &ApiClient::playUrlFailed, this, [this](const QString &message) {
         // 这是什么：播放地址接口失败后的本地回退。
@@ -333,14 +333,14 @@ void PlayerPage::initUI(const QString &videoId,
         // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
         LOG() << "播放地址接口请求失败，回退本地测试视频:" << message;
         startPlayback("D:/video-on-demand-client/test.mp4");
-        m_apiClient->fetchBarrages(m_videoKey);
+        m_apiClient->fetchBarrages(m_videoId);
     });
     connect(m_apiClient, &ApiClient::barragesLoaded, this, [this](const QHash<int, QStringList> &barragesBySecond) {
         // 这是什么：播放页接收接口弹幕列表并写入本地缓存。
-        // 为什么能实现：ApiClient 已经按秒数整理好弹幕，DataCenter 可以直接用 videoKey 批量保存。
+        // 为什么能实现：ApiClient 已经按秒数整理好弹幕，DataCenter 可以直接用 videoId 批量保存。
         // 什么时候调用：GET /videos/barrages 成功后由 Qt 信号槽触发。
         // 和谁配合：showBarragesAt() 后续按播放秒数从 DataCenter 读取并显示。
-        DataCenter::instance().setBarrages(m_videoKey, barragesBySecond);
+        DataCenter::instance().setBarrages(m_videoId, barragesBySecond);
         m_triggeredBarrageSeconds.clear();
     });
     connect(m_apiClient, &ApiClient::barrageSendSucceeded, this, [this](const QString &text, int seconds) {
@@ -348,7 +348,7 @@ void PlayerPage::initUI(const QString &videoId,
         // 为什么能实现：接口已确认保存成功，页面可以立即显示并把同一条写入 DataCenter 本地缓存。
         // 什么时候调用：POST /videos/barrages 成功后由 Qt 信号槽触发。
         // 和谁配合：DataCenter 缓存弹幕，showBarrageText() 负责把文本飘过视频区域。
-        DataCenter::instance().addBarrage(m_videoKey, seconds, text);
+        DataCenter::instance().addBarrage(m_videoId, seconds, text);
         if (m_isBarrageEnabled) {
             showBarrageText(text, 0);
             m_triggeredBarrageSeconds.insert(seconds);
@@ -379,6 +379,15 @@ void PlayerPage::initUI(const QString &videoId,
         ui->likeNum->setText(likeCount);
         updateLikeButton();
         LOG() << "播放页点赞状态已同步:" << m_title << (m_isLiked ? "已点赞" : "未点赞") << likeCount;
+    });
+    connect(m_apiClient, &ApiClient::videoLikeStatusLoaded, this, [this](bool liked, const QString &likeCount) {
+        // 这是什么：播放页应用后端返回的初始点赞状态。
+        // 为什么能实现：状态接口同时返回关系和数量，页面无需使用默认未点赞假设。
+        // 什么时候调用：GET /videos/like-status 成功后调用。
+        // 和谁配合：updateLikeButton() 绘制按钮，likeNum 展示服务端数量。
+        m_isLiked = liked;
+        ui->likeNum->setText(likeCount);
+        updateLikeButton();
     });
     connect(m_apiClient, &ApiClient::videoLikeFailed, this, [](const QString &message) {
         LOG() << "点赞接口请求失败，保留当前点赞状态:" << message;
@@ -444,11 +453,12 @@ void PlayerPage::initUI(const QString &videoId,
     if (!m_videoId.isEmpty()) {
         m_apiClient->fetchVideoDetail(m_videoId);
         m_apiClient->fetchWatchProgress(m_videoId);
+        m_apiClient->fetchVideoLikeStatus(m_videoId);
         if (DataCenter::instance().isLoggedIn()) {
             m_apiClient->fetchFavoriteStatus(m_videoId);
         }
     }
-    m_apiClient->fetchPlayUrl();
+    m_apiClient->fetchPlayUrl(m_videoId);
 
     m_mpvPlayer->setVolume(m_volume);
     m_mpvPlayer->setPlaySpeed(m_playSpeed);
@@ -823,10 +833,10 @@ void PlayerPage::sendBarrage()
     const int upperBound = m_durationSeconds > 0 ? m_durationSeconds : m_currentPlaySeconds;
     const int second = qBound(0, m_currentPlaySeconds, upperBound);
     // 这是什么：把发送弹幕从本地缓存改成接口提交。
-    // 为什么能实现：ApiClient::sendBarrage() 会把 videoKey、秒数、文本和用户信息 POST 到 mock/后端。
+    // 为什么能实现：ApiClient::sendBarrage() 会把 videoId、秒数、文本和用户信息 POST 到 mock/后端。
     // 什么时候调用：用户输入非空弹幕并点击发送或按回车时调用。
     // 和谁配合：barrageSendSucceeded 成功回调负责显示弹幕并写入 DataCenter。
-    m_apiClient->sendBarrage(m_videoKey, second, text);
+    m_apiClient->sendBarrage(m_videoId, second, text);
 }
 
 void PlayerPage::showBarragesAt(int seconds)
@@ -836,7 +846,7 @@ void PlayerPage::showBarragesAt(int seconds)
     }
 
     m_triggeredBarrageSeconds.insert(seconds);
-    const QStringList barrages = DataCenter::instance().barragesAt(m_videoKey, seconds);
+    const QStringList barrages = DataCenter::instance().barragesAt(m_videoId, seconds);
     for (const QString &text : barrages) {
         showBarrageText(text);
     }
@@ -889,7 +899,7 @@ void PlayerPage::startPlayback(const QString &playUrl)
     // 这是什么：用指定播放地址启动 mpv，并保持进入播放页后默认暂停。
     // 为什么能实现：MpvPlayer 已经绑定到 videoScreen，startPlay() 加载地址后 pause() 可以停在初始状态。
     // 什么时候调用：播放地址接口成功返回，或接口失败需要回退本地 test.mp4 时调用。
-    // 和谁配合：ApiClient 提供 playUrl，MpvPlayer 负责实际播放，弹幕用 m_videoKey 区分视频。
+    // 和谁配合：ApiClient 提供 playUrl，MpvPlayer 使用 m_videoKey 播放，弹幕则用 m_videoId 区分视频。
     const QString trimmedPlayUrl = playUrl.trimmed();
     if (trimmedPlayUrl.isEmpty()) {
         return;

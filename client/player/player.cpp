@@ -984,8 +984,15 @@ void player::initUI()
         LOG() << "点击置顶按钮，视频列表回到顶部";
     });
     connect(refreshBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：首页刷新按钮的真实数据刷新逻辑。
+        // 为什么能实现：清空搜索状态后重新调用 GET /videos，成功响应会通过 setHomeVideos() 重绘卡片。
+        // 什么时候调用：用户点击右下角刷新按钮时调用。
+        // 和谁配合：ApiClient::fetchVideos() 请求后端，DataCenter 保存最新首页列表。
         ui->videoScroll->verticalScrollBar()->setValue(0);
-        LOG() << "点击刷新按钮，当前阶段仅回到顶部，暂不重新请求视频列表";
+        ui->searchEdit->clear();
+        m_searchKeyword.clear();
+        m_apiClient->fetchVideos();
+        LOG() << "刷新首页视频列表";
     });
 
     // 放在全局样式后面设置，避免窗口全局样式覆盖按钮图片。

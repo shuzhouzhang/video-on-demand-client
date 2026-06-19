@@ -44,10 +44,11 @@ USERS = {
 }
 
 BARRAGES = {
-    "D:/video-on-demand-client/test.mp4": {
+    "video-001": {
         1: ["欢迎来到测试视频"],
         3: ["这条弹幕来自接口"],
     },
+    "video-002": {},
 }
 
 VIDEO_LIKES = {}
@@ -100,11 +101,15 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/videos/play-url":
-            self.handle_play_url()
+            self.handle_play_url(parsed_url.query)
             return
 
         if path == "/videos/barrages":
-            self.handle_get_barrages()
+            self.handle_get_barrages(parsed_url.query)
+            return
+
+        if path == "/videos/like-status":
+            self.handle_like_status(parsed_url.query)
             return
 
         if path == "/videos/detail":
@@ -252,6 +257,7 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         }
         VIDEOS.append(video)
         COMMENTS[video["id"]] = []
+        BARRAGES[video["id"]] = {}
         self.write_json(200, {"success": True, "message": "发布成功", "video": video})
 
     def handle_upload_video_files(self):
@@ -332,23 +338,33 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         }
         VIDEOS.append(video)
         COMMENTS[video_id] = []
+        BARRAGES[video_id] = {}
         self.write_json(200, {"success": True, "message": "文件上传成功", "video": video})
 
-    def handle_play_url(self):
-        # 这是什么：处理最小版播放地址接口 GET /videos/play-url。
-        # 为什么能实现：第一版不区分视频 id，固定返回本地 test.mp4 路径即可验证“播放页从接口拿地址”。
+    def handle_play_url(self, query):
+        # 这是什么：按 videoId 返回视频播放地址。
+        # 为什么能实现：先确认 VIDEOS 中存在该 id，再返回它对应的测试播放路径。
         # 什么时候调用：Qt 播放页打开后通过 ApiClient::fetchPlayUrl() 请求播放地址时调用。
         # 和谁配合：PlayerPage 收到 playUrl 后交给 MpvPlayer 播放，失败时回退本地路径。
-        self.write_json(200, {"success": True, "playUrl": "D:/video-on-demand-client/test.mp4"})
+        video_id = parse_qs(query).get("videoId", [""])[0].strip()
+        video = next((item for item in VIDEOS if item.get("id") == video_id), None)
+        if video is None:
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+        play_url = video.get("storedVideoPath") or "D:/video-on-demand-client/test.mp4"
+        self.write_json(200, {"success": True, "videoId": video_id, "playUrl": play_url})
 
-    def handle_get_barrages(self):
-        # 这是什么：处理第一版弹幕列表接口 GET /videos/barrages。
-        # 为什么能实现：mock server 用内存字典按 videoKey 和秒数保存弹幕，不依赖数据库。
-        # 什么时候调用：播放页拿到 m_videoKey 后，通过 ApiClient::fetchBarrages() 拉取弹幕时调用。
+    def handle_get_barrages(self, query):
+        # 这是什么：处理按视频查询弹幕列表的 GET /videos/barrages。
+        # 为什么能实现：mock server 用内存字典按 videoId 和秒数保存弹幕，不依赖数据库。
+        # 什么时候调用：播放页拿到 m_videoId 后，通过 ApiClient::fetchBarrages() 拉取弹幕时调用。
         # 和谁配合：ApiClient 解析返回的 barrages，PlayerPage 按播放秒数触发显示。
-        video_key = "D:/video-on-demand-client/test.mp4"
+        video_id = parse_qs(query).get("videoId", [""])[0].strip()
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
         items = []
-        for seconds, texts in BARRAGES.get(video_key, {}).items():
+        for seconds, texts in BARRAGES.get(video_id, {}).items():
             for text in texts:
                 items.append({"seconds": seconds, "text": text})
 
@@ -372,19 +388,22 @@ class MockVideosHandler(BaseHTTPRequestHandler):
         self.write_json(200, {"success": False, "message": "视频不存在"})
 
     def handle_send_barrage(self, payload):
-        # 这是什么：处理第一版发送弹幕接口 POST /videos/barrages。
-        # 为什么能实现：从 JSON 里读取 videoKey、seconds、text，校验后追加到 BARRAGES 内存字典。
+        # 这是什么：处理发送弹幕接口 POST /videos/barrages。
+        # 为什么能实现：从 JSON 里读取 videoId、seconds、text，校验后追加到对应视频的 BARRAGES 集合。
         # 什么时候调用：用户在播放页输入弹幕并点击发送时调用。
         # 和谁配合：ApiClient::sendBarrage() 发请求，PlayerPage 成功后立即展示并写入本地缓存。
-        video_key = str(payload.get("videoKey", "")).strip()
+        video_id = str(payload.get("videoId", "")).strip()
         text = str(payload.get("text", "")).strip()
         try:
             seconds = int(payload.get("seconds", -1))
         except (TypeError, ValueError):
             seconds = -1
 
-        if not video_key:
+        if not video_id:
             self.write_json(200, {"success": False, "message": "视频标识不能为空"})
+            return
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
             return
         if seconds < 0:
             self.write_json(200, {"success": False, "message": "弹幕时间非法"})
@@ -393,8 +412,29 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.write_json(200, {"success": False, "message": "弹幕内容不能为空"})
             return
 
-        BARRAGES.setdefault(video_key, {}).setdefault(seconds, []).append(text[:30])
+        BARRAGES.setdefault(video_id, {}).setdefault(seconds, []).append(text[:30])
         self.write_json(200, {"success": True, "message": "发送成功", "seconds": seconds, "text": text[:30]})
+
+    def handle_like_status(self, query):
+        # 这是什么：读取当前账号对视频的点赞状态和视频点赞数。
+        # 为什么能实现：VIDEO_LIKES 保存关系，VIDEOS 保存 likeCount，两者组合就是完整初始状态。
+        # 什么时候调用：播放页初始化点赞按钮时调用。
+        # 和谁配合：ApiClient::fetchVideoLikeStatus() 将结果交给 PlayerPage。
+        params = parse_qs(query)
+        video_id = params.get("videoId", [""])[0].strip()
+        account = params.get("account", ["guest"])[0].strip() or "guest"
+        video = next((item for item in VIDEOS if item.get("id") == video_id), None)
+        if video is None:
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+        self.write_json(
+            200,
+            {
+                "success": True,
+                "liked": account in VIDEO_LIKES.get(video_id, set()),
+                "likeCount": video.get("likeCount", "0"),
+            },
+        )
 
     def handle_video_like(self, payload, should_like):
         # 这是什么：处理第一版点赞/取消点赞接口。
