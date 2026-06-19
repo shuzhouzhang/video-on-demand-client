@@ -13,6 +13,7 @@
 class ApiClient;
 class Login;
 class QEvent;
+class QGridLayout;
 class QLayout;
 class QMouseEvent;
 class QObject;
@@ -49,6 +50,7 @@ private:
     void renderHomeVideos();
     void setHomeVideos(const QList<VideoInfo> &videos);
     void searchHomeVideos();
+    void renderMyVideoList(const QList<VideoInfo> &videos, const QString &title, const QString &emptyText);
     void selectHomeCategory(const QString &category);
     void clearLayout(QLayout *layout);
     void showLoginWindow();
@@ -73,6 +75,7 @@ private:
     QString m_searchKeyword;
     QList<QPushButton *> m_categoryButtons;
     QList<QPushButton *> m_tagButtons;
+    QGridLayout *m_myVideoGridLayout = nullptr;
 };
 
 #endif // PLAYER_H

@@ -125,6 +125,30 @@ public:
     // 和谁配合：player.cpp 负责输入和渲染，searchResultsLoaded 返回可为空的视频列表。
     void searchVideos(const QString &keyword);
 
+    // 这是什么：查询当前用户是否已收藏某个视频。
+    // 为什么能实现：把 videoId 和 DataCenter 当前账号作为 GET 参数，后端可查询二者的收藏关系。
+    // 什么时候调用：播放页打开并拿到 videoId 后调用。
+    // 和谁配合：PlayerPage 收到 videoFavoriteStatusLoaded 后初始化收藏按钮。
+    void fetchFavoriteStatus(const QString &videoId);
+
+    // 这是什么：收藏当前视频。
+    // 为什么能实现：把 videoId/account POST 到收藏接口，后端写入用户和视频的关系。
+    // 什么时候调用：已登录用户点击未收藏状态的按钮时调用。
+    // 和谁配合：PlayerPage 等待 videoFavoriteChanged 后更新按钮。
+    void favoriteVideo(const QString &videoId);
+
+    // 这是什么：取消收藏当前视频。
+    // 为什么能实现：请求体与收藏相同，但后端从收藏关系中删除当前账号。
+    // 什么时候调用：已登录用户点击已收藏状态的按钮时调用。
+    // 和谁配合：PlayerPage 等待 videoFavoriteChanged 后更新按钮。
+    void unfavoriteVideo(const QString &videoId);
+
+    // 这是什么：请求当前登录用户收藏的视频列表。
+    // 为什么能实现：ApiClient 从 DataCenter 读取账号，后端按账号返回对应 VideoInfo 数组。
+    // 什么时候调用：用户点击“我的收藏”入口时调用。
+    // 和谁配合：player.cpp 收到 favoriteVideosLoaded 后在“我的”页面渲染 VideoBox。
+    void fetchFavoriteVideos();
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -264,12 +288,42 @@ signals:
     // 和谁配合：player.cpp 恢复搜索按钮并保留搜索前的视频列表。
     void searchFailed(const QString &message);
 
+    // 这是什么：当前视频收藏状态查询成功后的通知。
+    // 为什么能实现：后端返回 favorited 布尔值，页面可以直接初始化按钮状态。
+    // 什么时候触发：fetchFavoriteStatus() 成功时触发。
+    // 和谁配合：PlayerPage 更新 m_isFavorited 和收藏按钮。
+    void videoFavoriteStatusLoaded(bool favorited);
+
+    // 这是什么：收藏关系修改成功后的通知。
+    // 为什么能实现：后端返回最终 favorited 状态，避免页面提前猜测请求结果。
+    // 什么时候触发：favoriteVideo() 或 unfavoriteVideo() 成功时触发。
+    // 和谁配合：PlayerPage 根据最终状态更新星标按钮。
+    void videoFavoriteChanged(bool favorited);
+
+    // 这是什么：我的收藏视频列表加载成功后的通知。
+    // 为什么能实现：接口视频字段与 VideoInfo 一致，可直接解析成首页同款列表。
+    // 什么时候触发：fetchFavoriteVideos() 成功时触发，空列表也属于成功。
+    // 和谁配合：player.cpp 在“我的收藏”区域展示 VideoBox。
+    void favoriteVideosLoaded(const QList<VideoInfo> &videos);
+
+    // 这是什么：收藏业务失败后的统一通知。
+    // 为什么能实现：未登录、参数错误、网络失败和后端拒绝都转换成 message。
+    // 什么时候触发：收藏状态、收藏操作或收藏列表请求失败时触发。
+    // 和谁配合：PlayerPage/player.cpp 只提示或记录错误，不影响其它功能。
+    void favoriteRequestFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
     // 什么时候调用：likeVideo() 和 unlikeVideo() 分别传入不同 URL 后调用。
     // 和谁配合：m_likeUrl/m_unlikeUrl 提供接口地址，videoLikeChanged/videoLikeFailed 通知播放页。
     void sendVideoLikeRequest(const QUrl &url, const QString &videoId);
+
+    // 这是什么：收藏和取消收藏共用的 POST 请求实现。
+    // 为什么这样做：两个操作只有 URL 不同，请求体和响应解析完全相同，集中处理可避免重复。
+    // 什么时候调用：favoriteVideo() 和 unfavoriteVideo() 分别传入对应地址时调用。
+    // 和谁配合：videoFavoriteChanged 把后端最终状态交回 PlayerPage。
+    void sendVideoFavoriteRequest(const QUrl &url, const QString &videoId);
 
     // 这是什么：当前首页视频列表接口地址。
     // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
@@ -336,6 +390,15 @@ private:
     // 什么时候使用：searchVideos() 创建网络请求时使用。
     // 和谁配合：tools/mock_videos_server.py 的 GET /videos/search。
     QUrl m_searchUrl = QUrl("http://127.0.0.1:8080/videos/search");
+
+    // 这是什么：收藏状态、收藏操作和个人收藏列表的接口地址。
+    // 为什么这样做：读状态、写关系、读列表职责不同，使用独立 REST 路径更清晰。
+    // 什么时候使用：播放页初始化/点击收藏，以及“我的收藏”入口请求列表时使用。
+    // 和谁配合：mock server 的 VIDEO_FAVORITES 关系集合。
+    QUrl m_favoriteStatusUrl = QUrl("http://127.0.0.1:8080/videos/favorite-status");
+    QUrl m_favoriteUrl = QUrl("http://127.0.0.1:8080/videos/favorite");
+    QUrl m_unfavoriteUrl = QUrl("http://127.0.0.1:8080/videos/unfavorite");
+    QUrl m_favoriteVideosUrl = QUrl("http://127.0.0.1:8080/users/favorites");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。

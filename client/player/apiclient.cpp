@@ -737,3 +737,140 @@ void ApiClient::searchVideos(const QString &keyword)
         reply->deleteLater();
     });
 }
+
+void ApiClient::fetchFavoriteStatus(const QString &videoId)
+{
+    // 这是什么：查询当前账号与视频之间的收藏关系。
+    // 为什么能实现：后端用 account + videoId 作为唯一关系键，可返回最终 favorited 状态。
+    // 什么时候调用：播放页初始化视频详情和播放记录时一并调用。
+    // 和谁配合：DataCenter 提供账号，PlayerPage 接收 videoFavoriteStatusLoaded。
+    const QString trimmedVideoId = videoId.trimmed();
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (trimmedVideoId.isEmpty() || user.account.isEmpty()) {
+        emit favoriteRequestFailed("请先登录后查看收藏状态");
+        return;
+    }
+
+    QUrl url = m_favoriteStatusUrl;
+    QUrlQuery query;
+    query.addQueryItem("videoId", trimmedVideoId);
+    query.addQueryItem("account", user.account);
+    url.setQuery(query);
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit favoriteRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit favoriteRequestFailed(obj["message"].toString("收藏状态加载失败"));
+        } else {
+            emit videoFavoriteStatusLoaded(obj["favorited"].toBool(false));
+        }
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::favoriteVideo(const QString &videoId)
+{
+    // 这是什么：收藏视频的公开入口。
+    // 为什么能实现：复用共同 POST 实现，并指定收藏接口地址。
+    // 什么时候调用：播放页当前为未收藏状态时调用。
+    // 和谁配合：sendVideoFavoriteRequest() 完成请求并发出最终状态。
+    sendVideoFavoriteRequest(m_favoriteUrl, videoId);
+}
+
+void ApiClient::unfavoriteVideo(const QString &videoId)
+{
+    // 这是什么：取消收藏视频的公开入口。
+    // 为什么能实现：复用共同 POST 实现，并指定取消收藏接口地址。
+    // 什么时候调用：播放页当前为已收藏状态时调用。
+    // 和谁配合：sendVideoFavoriteRequest() 完成请求并发出最终状态。
+    sendVideoFavoriteRequest(m_unfavoriteUrl, videoId);
+}
+
+void ApiClient::sendVideoFavoriteRequest(const QUrl &url, const QString &videoId)
+{
+    // 这是什么：发送收藏或取消收藏请求的共同实现。
+    // 为什么能实现：两个接口都接收 videoId/account，并返回最终 favorited 状态。
+    // 什么时候调用：用户点击播放页收藏按钮后，由 favoriteVideo()/unfavoriteVideo() 调用。
+    // 和谁配合：DataCenter 提供登录账号，PlayerPage 接收 videoFavoriteChanged。
+    const QString trimmedVideoId = videoId.trimmed();
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (trimmedVideoId.isEmpty()) {
+        emit favoriteRequestFailed("视频 id 不能为空");
+        return;
+    }
+    if (user.account.isEmpty()) {
+        emit favoriteRequestFailed("请先登录后再收藏视频");
+        return;
+    }
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["videoId"] = trimmedVideoId;
+    payload["account"] = user.account;
+    QNetworkReply *reply = m_networkManager->post(
+        request,
+        QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit favoriteRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit favoriteRequestFailed(obj["message"].toString("收藏操作失败"));
+        } else {
+            emit videoFavoriteChanged(obj["favorited"].toBool(false));
+        }
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::fetchFavoriteVideos()
+{
+    // 这是什么：读取当前用户全部收藏视频。
+    // 为什么能实现：后端根据 account 找到收藏 videoId，再映射回完整 VIDEOS 数据。
+    // 什么时候调用：用户进入“我的”页面并点击“我的收藏”时调用。
+    // 和谁配合：favoriteVideosLoaded 把 VideoInfo 列表交给 player.cpp 渲染。
+    const UserInfo user = DataCenter::instance().currentUser();
+    if (user.account.isEmpty()) {
+        emit favoriteRequestFailed("请先登录后查看收藏");
+        return;
+    }
+
+    QUrl url = m_favoriteVideosUrl;
+    QUrlQuery query;
+    query.addQueryItem("account", user.account);
+    url.setQuery(query);
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit favoriteRequestFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit favoriteRequestFailed(obj["message"].toString("收藏列表加载失败"));
+            reply->deleteLater();
+            return;
+        }
+
+        QList<VideoInfo> videos;
+        const QJsonArray items = obj["videos"].toArray();
+        for (const QJsonValue &value : items) {
+            const VideoInfo video = videoInfoFromJsonObject(value.toObject());
+            if (!video.id.isEmpty()) {
+                videos.append(video);
+            }
+        }
+        emit favoriteVideosLoaded(videos);
+        reply->deleteLater();
+    });
+}

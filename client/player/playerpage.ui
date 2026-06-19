@@ -624,6 +624,18 @@ QSlider::handle:horizontal {
           </widget>
          </item>
          <item>
+          <widget class="QPushButton" name="favoriteBtn">
+           <property name="minimumSize">
+            <size><width>32</width><height>30</height></size>
+           </property>
+           <property name="maximumSize">
+            <size><width>32</width><height>30</height></size>
+           </property>
+           <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+           <property name="toolTip"><string>收藏</string></property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="likeBtn">
            <property name="minimumSize">
             <size>

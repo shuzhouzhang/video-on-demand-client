@@ -393,6 +393,58 @@ void player::searchHomeVideos()
     m_apiClient->searchVideos(keyword);
 }
 
+void player::renderMyVideoList(const QList<VideoInfo> &videos,
+                               const QString &title,
+                               const QString &emptyText)
+{
+    // 这是什么：在“我的”页面展示一组视频卡片。
+    // 为什么能实现：收藏列表和我的视频都使用 VideoInfo，可复用 VideoBox 以及进入播放页的信号连接。
+    // 什么时候调用：收藏列表或后续我的视频接口成功返回时调用。
+    // 和谁配合：ApiClient 提供视频列表，m_myVideoGridLayout 承载卡片，PlayerPage 负责播放。
+    ui->myWorksTitleLabel->setText(title);
+    clearLayout(m_myVideoGridLayout);
+    if (videos.isEmpty()) {
+        ui->myWorksEmptyLabel->setText(emptyText);
+        ui->myWorksEmptyLabel->show();
+        return;
+    }
+
+    ui->myWorksEmptyLabel->hide();
+    int index = 0;
+    for (const VideoInfo &video : videos) {
+        auto *videoBox = new VideoBox(ui->myWorksBox);
+        videoBox->setVideoInfo(video.id,
+                               video.title,
+                               video.userName,
+                               video.date,
+                               video.duration,
+                               video.playCount,
+                               video.likeCount);
+        connect(videoBox,
+                &VideoBox::videoClicked,
+                this,
+                [](const QString &videoId,
+                   const QString &videoTitle,
+                   const QString &userName,
+                   const QString &date,
+                   const QString &duration,
+                   const QString &playCount,
+                   const QString &likeCount) {
+                    auto *page = new PlayerPage(videoId,
+                                                videoTitle,
+                                                userName,
+                                                date,
+                                                duration,
+                                                playCount,
+                                                likeCount);
+                    page->setAttribute(Qt::WA_DeleteOnClose);
+                    page->show();
+                });
+        m_myVideoGridLayout->addWidget(videoBox, index / 4, index % 4);
+        ++index;
+    }
+}
+
 void player::initUI()
 {
     // setupUi() 会读取 player.ui 生成的界面结构，并把控件挂到 ui 指针上。
@@ -447,6 +499,12 @@ void player::initUI()
     ui->settingEntryBtn->setIcon(QIcon(":/images/myself/shezhi.png"));
     ui->settingEntryBtn->setIconSize(QSize(28, 28));
 
+    m_myVideoGridLayout = new QGridLayout;
+    m_myVideoGridLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_myVideoGridLayout->setHorizontalSpacing(16);
+    m_myVideoGridLayout->setVerticalSpacing(18);
+    ui->myWorksLayout->addLayout(m_myVideoGridLayout);
+
     initHomeFilters();
     renderHomeVideos();
 
@@ -478,6 +536,19 @@ void player::initUI()
         ui->searchBtn->setEnabled(true);
         ui->searchBtn->setText(QStringLiteral("搜索"));
         LOG() << "视频搜索失败，保留当前列表:" << message;
+    });
+    connect(m_apiClient, &ApiClient::favoriteVideosLoaded, this, [this](const QList<VideoInfo> &videos) {
+        // 这是什么：把当前用户收藏的视频展示到“我的”页面。
+        // 为什么能实现：收藏接口返回标准 VideoInfo，renderMyVideoList() 可直接复用视频卡片。
+        // 什么时候调用：GET /users/favorites 成功返回时调用。
+        // 和谁配合：“我的收藏”入口发请求，本函数负责完成列表展示。
+        renderMyVideoList(videos, QStringLiteral("我的收藏"), QStringLiteral("暂无收藏"));
+        LOG() << "我的收藏加载完成，数量:" << videos.size();
+    });
+    connect(m_apiClient, &ApiClient::favoriteRequestFailed, this, [this](const QString &message) {
+        ui->myWorksEmptyLabel->setText(message);
+        ui->myWorksEmptyLabel->show();
+        LOG() << "我的收藏加载失败:" << message;
     });
     m_apiClient->fetchVideos();
 
@@ -597,7 +668,12 @@ void player::initUI()
             return;
         }
 
-        LOG() << "点击我的关注入口，当前阶段暂不加载关注列表";
+        ui->myWorksTitleLabel->setText(QStringLiteral("我的收藏"));
+        ui->myWorksEmptyLabel->setText(QStringLiteral("正在加载收藏..."));
+        ui->myWorksEmptyLabel->show();
+        clearLayout(m_myVideoGridLayout);
+        m_apiClient->fetchFavoriteVideos();
+        LOG() << "请求我的收藏列表";
     });
     connect(ui->settingEntryBtn, &QPushButton::clicked, this, [this]() {
         if (!DataCenter::instance().isLoggedIn()) {

@@ -145,6 +145,7 @@ void PlayerPage::initUI(const QString &videoId,
     initBarrageControls();
     updatePlayButton();
     updateLikeButton();
+    updateFavoriteButton();
     updateSpeedButton();
     updateVolumeLabel();
     updateBarrageButton();
@@ -188,6 +189,22 @@ void PlayerPage::initUI(const QString &videoId,
             m_apiClient->unlikeVideo(m_videoId);
         } else {
             m_apiClient->likeVideo(m_videoId);
+        }
+    });
+
+    connect(ui->favoriteBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：播放页收藏按钮的业务入口。
+        // 为什么能实现：m_isFavorited 保存当前状态，点击后选择收藏或取消收藏接口。
+        // 什么时候调用：用户点击星标收藏按钮时调用。
+        // 和谁配合：DataCenter 判断登录，videoFavoriteChanged 成功后真正更新页面状态。
+        if (!DataCenter::instance().isLoggedIn()) {
+            QMessageBox::information(this, QStringLiteral("需要登录"), QStringLiteral("请先登录后再收藏视频"));
+            return;
+        }
+        if (m_isFavorited) {
+            m_apiClient->unfavoriteVideo(m_videoId);
+        } else {
+            m_apiClient->favoriteVideo(m_videoId);
         }
     });
 
@@ -403,10 +420,33 @@ void PlayerPage::initUI(const QString &videoId,
         m_commentDialog->showError(message);
         LOG() << "评论接口请求失败:" << message;
     });
+    connect(m_apiClient, &ApiClient::videoFavoriteStatusLoaded, this, [this](bool favorited) {
+        // 这是什么：播放页初始化收藏状态。
+        // 为什么能实现：后端返回当前账号与视频的真实关系，页面不需要默认猜测。
+        // 什么时候调用：GET /videos/favorite-status 成功后调用。
+        // 和谁配合：updateFavoriteButton() 把布尔状态转换成空心或实心星标。
+        m_isFavorited = favorited;
+        updateFavoriteButton();
+    });
+    connect(m_apiClient, &ApiClient::videoFavoriteChanged, this, [this](bool favorited) {
+        // 这是什么：收藏或取消收藏成功后的页面收尾。
+        // 为什么能实现：接口返回最终状态，只有成功后才改变本地按钮，避免网络失败造成假状态。
+        // 什么时候调用：POST /videos/favorite 或 /videos/unfavorite 成功时调用。
+        // 和谁配合：ApiClient 修改后端关系，updateFavoriteButton() 更新用户看到的结果。
+        m_isFavorited = favorited;
+        updateFavoriteButton();
+        LOG() << "视频收藏状态已同步:" << m_videoId << favorited;
+    });
+    connect(m_apiClient, &ApiClient::favoriteRequestFailed, this, [](const QString &message) {
+        LOG() << "收藏接口请求失败:" << message;
+    });
 
     if (!m_videoId.isEmpty()) {
         m_apiClient->fetchVideoDetail(m_videoId);
         m_apiClient->fetchWatchProgress(m_videoId);
+        if (DataCenter::instance().isLoggedIn()) {
+            m_apiClient->fetchFavoriteStatus(m_videoId);
+        }
     }
     m_apiClient->fetchPlayUrl();
 
@@ -689,6 +729,19 @@ void PlayerPage::updateVolumeLabel()
     if (m_volumeValueLabel) {
         m_volumeValueLabel->setText(QString::number(m_volume));
     }
+}
+
+void PlayerPage::updateFavoriteButton()
+{
+    // 这是什么：根据当前收藏状态绘制星标按钮。
+    // 为什么能实现：空心星和实心星分别表达未收藏/已收藏，颜色同步加强状态识别。
+    // 什么时候调用：播放页初始化、收藏状态查询成功或收藏关系修改成功后调用。
+    // 和谁配合：m_isFavorited 保存状态，ApiClient 的收藏信号负责改变它。
+    ui->favoriteBtn->setText(m_isFavorited ? QStringLiteral("★") : QStringLiteral("☆"));
+    ui->favoriteBtn->setToolTip(m_isFavorited ? QStringLiteral("取消收藏") : QStringLiteral("收藏"));
+    ui->favoriteBtn->setStyleSheet(m_isFavorited
+                                       ? QStringLiteral("QPushButton#favoriteBtn { border: none; background: transparent; color: #f59e0b; font-size: 24px; }")
+                                       : QStringLiteral("QPushButton#favoriteBtn { border: none; background: transparent; color: #64748b; font-size: 24px; } QPushButton#favoriteBtn:hover { color: #f59e0b; }"));
 }
 
 void PlayerPage::updateBarrageButton()

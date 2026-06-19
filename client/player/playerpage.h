@@ -63,6 +63,7 @@ private:
     void initBarrageControls();
     void updatePlayButton();
     void updateLikeButton();
+    void updateFavoriteButton();
     void updateSpeedButton();
     void updateVolumeLabel();
     void updateBarrageButton();
@@ -86,6 +87,7 @@ private:
     bool m_isDragging = false;
     bool m_isPlaying = false;
     bool m_isLiked = false;
+    bool m_isFavorited = false;
     bool m_isSliderPressed = false;
     double m_playSpeed = 1.0;
     int m_volume = 60;

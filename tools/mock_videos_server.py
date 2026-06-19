@@ -46,6 +46,7 @@ BARRAGES = {
 }
 
 VIDEO_LIKES = {}
+VIDEO_FAVORITES = {}
 WATCH_PROGRESS = {}
 COMMENTS = {
     "video-001": [
@@ -115,6 +116,14 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_search_videos(parsed_url.query)
             return
 
+        if path == "/videos/favorite-status":
+            self.handle_favorite_status(parsed_url.query)
+            return
+
+        if path == "/users/favorites":
+            self.handle_favorite_videos(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -153,6 +162,14 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos/comments":
             self.handle_send_comment(payload)
+            return
+
+        if self.path == "/videos/favorite":
+            self.handle_video_favorite(payload, True)
+            return
+
+        if self.path == "/videos/unfavorite":
+            self.handle_video_favorite(payload, False)
             return
 
         self.send_response(404)
@@ -406,6 +423,65 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         self.write_json(200, {"success": True, "videos": matched_videos})
 
+    def handle_favorite_status(self, query):
+        # 这是什么：查询某个账号是否收藏了某个视频。
+        # 为什么能实现：VIDEO_FAVORITES 按 videoId 保存账号集合，判断 account 是否在集合中即可。
+        # 什么时候调用：播放页初始化收藏星标状态时调用。
+        # 和谁配合：ApiClient::fetchFavoriteStatus() 解析 favorited 并更新 PlayerPage。
+        params = parse_qs(query)
+        video_id = params.get("videoId", [""])[0].strip()
+        account = params.get("account", [""])[0].strip()
+        if not video_id or not account:
+            self.write_json(200, {"success": False, "message": "视频 id 和账号不能为空"})
+            return
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+        self.write_json(
+            200,
+            {"success": True, "favorited": account in VIDEO_FAVORITES.get(video_id, set())},
+        )
+
+    def handle_video_favorite(self, payload, should_favorite):
+        # 这是什么：处理收藏和取消收藏视频的关系写入。
+        # 为什么能实现：账号集合天然去重，重复收藏不会产生多份关系，discard 也能安全取消。
+        # 什么时候调用：Qt 播放页 POST /videos/favorite 或 /videos/unfavorite 时调用。
+        # 和谁配合：我的收藏接口再按账号反查这些关系并返回完整视频。
+        video_id = str(payload.get("videoId", "")).strip()
+        account = str(payload.get("account", "")).strip()
+        if not video_id:
+            self.write_json(200, {"success": False, "message": "视频 id 不能为空"})
+            return
+        if not account:
+            self.write_json(200, {"success": False, "message": "请先登录后再收藏视频"})
+            return
+        if not any(video.get("id") == video_id for video in VIDEOS):
+            self.write_json(200, {"success": False, "message": "视频不存在"})
+            return
+
+        accounts = VIDEO_FAVORITES.setdefault(video_id, set())
+        if should_favorite:
+            accounts.add(account)
+        else:
+            accounts.discard(account)
+        self.write_json(200, {"success": True, "favorited": account in accounts})
+
+    def handle_favorite_videos(self, query):
+        # 这是什么：返回当前账号收藏的完整视频列表。
+        # 为什么能实现：遍历 VIDEOS，并保留收藏账号集合中包含当前 account 的视频。
+        # 什么时候调用：用户点击“我的收藏”入口时调用。
+        # 和谁配合：ApiClient 转成 QList<VideoInfo>，player.cpp 渲染 VideoBox。
+        account = parse_qs(query).get("account", [""])[0].strip()
+        if not account:
+            self.write_json(200, {"success": False, "message": "请先登录后查看收藏"})
+            return
+        videos = [
+            video
+            for video in VIDEOS
+            if account in VIDEO_FAVORITES.get(video.get("id", ""), set())
+        ]
+        self.write_json(200, {"success": True, "videos": videos})
+
 
 def create_server(host="127.0.0.1", port=8080):
     return HTTPServer((host, port), MockVideosHandler)
@@ -413,5 +489,5 @@ def create_server(host="127.0.0.1", port=8080):
 
 if __name__ == "__main__":
     server = create_server()
-    print("Mock server running at videos/login/play-url/barrages/detail/like/watch-progress/comments/search mock endpoints")
+    print("Mock server running with videos, login, playback, social and user-library mock endpoints")
     server.serve_forever()

@@ -230,6 +230,50 @@ def main():
 
         print("OK: /videos/search communication test passed")
 
+        with urllib.request.urlopen(
+            f"{base_url}/videos/favorite-status?videoId=video-001&account=bit-user-001",
+            timeout=3,
+        ) as response:
+            initial_favorite = json.loads(response.read().decode("utf-8"))
+        assert initial_favorite["success"] is True, "favorite status should load"
+        assert initial_favorite["favorited"] is False, "video should initially be unfavorited"
+
+        favorite_success = post_json(
+            f"{base_url}/videos/favorite",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert favorite_success["success"] is True, "favorite should succeed"
+        assert favorite_success["favorited"] is True, "favorite should return final true state"
+
+        favorite_repeat = post_json(
+            f"{base_url}/videos/favorite",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert favorite_repeat["favorited"] is True, "repeat favorite should remain true"
+
+        with urllib.request.urlopen(
+            f"{base_url}/users/favorites?account=bit-user-001",
+            timeout=3,
+        ) as response:
+            favorite_videos = json.loads(response.read().decode("utf-8"))
+        assert favorite_videos["success"] is True, "favorite videos should load"
+        assert [video["id"] for video in favorite_videos["videos"]] == ["video-001"], "favorite list should not duplicate video"
+
+        unfavorite_success = post_json(
+            f"{base_url}/videos/unfavorite",
+            {"videoId": "video-001", "account": "bit-user-001"},
+        )
+        assert unfavorite_success["success"] is True, "unfavorite should succeed"
+        assert unfavorite_success["favorited"] is False, "unfavorite should return final false state"
+
+        guest_favorite = post_json(
+            f"{base_url}/videos/favorite",
+            {"videoId": "video-001", "account": ""},
+        )
+        assert guest_favorite["success"] is False, "guest should not favorite videos"
+
+        print("OK: video favorite communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)
