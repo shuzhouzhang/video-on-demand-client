@@ -7,6 +7,7 @@
 #include "ui_player.h"
 #include "pageswitchbutton.h"
 #include "playerpage.h"
+#include "profiledialog.h"
 #include "uploadvideopage.h"
 #include "util.h"
 #include "videobox.h"
@@ -154,7 +155,26 @@ void player::updateLoginState(const QString &userName, const QString &account)
     ui->myAccountLabel->setText("账号：" + currentUser.account);
     ui->myDescLabel->setText("欢迎回来，开始管理你的个人资料和视频内容吧");
 
+    if (m_apiClient) {
+        m_apiClient->fetchUserProfile();
+    }
+
     LOG() << "我的页面已切换到登录状态:" << currentUser.account;
+}
+
+void player::applyUserProfile(const UserInfo &user)
+{
+    // 这是什么：把接口返回的完整个人资料同步到共享状态和“我的”页面。
+    // 为什么能实现：DataCenter 保存最终 UserInfo，页面控件再从同一对象读取昵称、账号和简介。
+    // 什么时候调用：个人资料读取或修改接口成功后调用。
+    // 和谁配合：ApiClient 提供 user，ProfileDialog 修改后也复用本函数完成收尾。
+    DataCenter::instance().setCurrentUser(user);
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    ui->myNickNameLabel->setText(currentUser.userName);
+    ui->myAccountLabel->setText(QStringLiteral("账号：") + currentUser.account);
+    ui->myDescLabel->setText(currentUser.description.isEmpty()
+                                 ? QStringLiteral("这个人很低调，还没有填写简介")
+                                 : currentUser.description);
 }
 
 void player::clearLayout(QLayout *layout)
@@ -513,6 +533,7 @@ void player::initUI()
     // 什么时候调用：主窗口 initUI() 初始化首页控件后调用一次。
     // 和谁配合：ApiClient 请求 mock server/真实后端，成功走 setHomeVideos()，失败只记录日志并保留本地数据。
     m_apiClient = new ApiClient(this);
+    m_profileDialog = new ProfileDialog(this);
     connect(m_apiClient, &ApiClient::videosLoaded, this, &player::setHomeVideos);
     connect(m_apiClient, &ApiClient::requestFailed, this, [this](const QString &message) {
         LOG() << "首页视频接口请求失败，继续使用本地兜底数据:" << message;
@@ -549,6 +570,39 @@ void player::initUI()
         ui->myWorksEmptyLabel->setText(message);
         ui->myWorksEmptyLabel->show();
         LOG() << "我的收藏加载失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::userProfileLoaded, this, [this](const UserInfo &user) {
+        // 这是什么：登录后读取资料成功的处理。
+        // 为什么能实现：applyUserProfile() 同时更新 DataCenter 和页面，避免保存两份不一致状态。
+        // 什么时候调用：GET /users/profile 成功时调用。
+        // 和谁配合：ApiClient 负责网络和解析，本函数负责界面数据落地。
+        applyUserProfile(user);
+        LOG() << "个人资料加载成功:" << user.account;
+    });
+    connect(m_apiClient, &ApiClient::userProfileUpdated, this, [this](const UserInfo &user) {
+        // 这是什么：编辑资料保存成功后的收尾。
+        // 为什么能实现：使用后端返回的最终资料更新页面，再关闭编辑窗口。
+        // 什么时候调用：POST /users/profile 成功时调用。
+        // 和谁配合：ProfileDialog 发起保存，ApiClient 返回结果，DataCenter 保存状态。
+        applyUserProfile(user);
+        m_profileDialog->setSaving(false);
+        m_profileDialog->accept();
+        LOG() << "个人资料修改成功:" << user.account;
+    });
+    connect(m_apiClient, &ApiClient::userProfileFailed, this, [this](const QString &message) {
+        if (m_profileDialog->isVisible()) {
+            m_profileDialog->showError(message);
+        }
+        LOG() << "个人资料接口失败:" << message;
+    });
+    connect(m_profileDialog, &ProfileDialog::saveRequested, this, [this](const QString &userName,
+                                                                         const QString &description) {
+        // 这是什么：资料窗口提交表单后的接口入口。
+        // 为什么能实现：ProfileDialog 已校验昵称，ApiClient 再负责业务校验和 POST。
+        // 什么时候调用：用户点击资料窗口保存按钮时调用。
+        // 和谁配合：userProfileUpdated/userProfileFailed 决定窗口最终状态。
+        m_profileDialog->setSaving(true);
+        m_apiClient->updateUserProfile(userName, description);
     });
     m_apiClient->fetchVideos();
 
@@ -641,7 +695,11 @@ void player::initUI()
             return;
         }
 
-        LOG() << "点击编辑资料按钮，当前阶段暂不打开编辑资料页";
+        m_profileDialog->setUser(DataCenter::instance().currentUser());
+        m_profileDialog->show();
+        m_profileDialog->raise();
+        m_profileDialog->activateWindow();
+        LOG() << "打开个人资料编辑窗口";
     });
     connect(ui->uploadEntryBtn, &QPushButton::clicked, this, [this]() {
         ui->uploadVideoPage->resetPage();

@@ -30,6 +30,7 @@ qt_add_executable(player
     datacenter.h datacenter.cpp
     bulletscreenitem.h bulletscreenitem.cpp
     commentdialog.h commentdialog.cpp
+    profiledialog.h profiledialog.cpp
     playerpage.h playerpage.cpp playerpage.ui
     login.h login.cpp login.ui
     uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui

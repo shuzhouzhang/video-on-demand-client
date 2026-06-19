@@ -35,6 +35,7 @@ USERS = {
     "bit-user-001": {
         "password": "bit123456",
         "userName": "BIT 用户",
+        "description": "热爱视频，也热爱写代码。",
     },
 }
 
@@ -124,6 +125,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.handle_favorite_videos(parsed_url.query)
             return
 
+        if path == "/users/profile":
+            self.handle_get_user_profile(parsed_url.query)
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -170,6 +175,10 @@ class MockVideosHandler(BaseHTTPRequestHandler):
 
         if self.path == "/videos/unfavorite":
             self.handle_video_favorite(payload, False)
+            return
+
+        if self.path == "/users/profile":
+            self.handle_update_user_profile(payload)
             return
 
         self.send_response(404)
@@ -481,6 +490,61 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             if account in VIDEO_FAVORITES.get(video.get("id", ""), set())
         ]
         self.write_json(200, {"success": True, "videos": videos})
+
+    def handle_get_user_profile(self, query):
+        # 这是什么：读取当前账号的个人资料。
+        # 为什么能实现：USERS 以 account 为键保存昵称和简介，可直接组装成安全的公开资料响应。
+        # 什么时候调用：登录成功后 Qt 通过 ApiClient::fetchUserProfile() 刷新“我的”页面时调用。
+        # 和谁配合：DataCenter 保存响应，player.cpp 更新昵称、账号和简介。
+        account = parse_qs(query).get("account", [""])[0].strip()
+        user = USERS.get(account)
+        if not account or user is None:
+            self.write_json(200, {"success": False, "message": "用户不存在"})
+            return
+        self.write_json(
+            200,
+            {
+                "success": True,
+                "user": {
+                    "account": account,
+                    "userName": user["userName"],
+                    "description": user.get("description", ""),
+                },
+            },
+        )
+
+    def handle_update_user_profile(self, payload):
+        # 这是什么：修改当前账号的昵称和简介。
+        # 为什么能实现：账号定位 USERS 中的记录，校验长度后更新内存字段并返回最终资料。
+        # 什么时候调用：ProfileDialog 通过 ApiClient::updateUserProfile() 提交表单时调用。
+        # 和谁配合：Qt 使用返回值同步 DataCenter 和“我的”页面。
+        account = str(payload.get("account", "")).strip()
+        user_name = str(payload.get("userName", "")).strip()
+        description = str(payload.get("description", "")).strip()
+        user = USERS.get(account)
+        if not account or user is None:
+            self.write_json(200, {"success": False, "message": "用户不存在"})
+            return
+        if not user_name or len(user_name) > 20:
+            self.write_json(200, {"success": False, "message": "昵称需为 1 到 20 个字符"})
+            return
+        if len(description) > 100:
+            self.write_json(200, {"success": False, "message": "个人简介不能超过 100 个字符"})
+            return
+        user["userName"] = user_name
+        user["description"] = description
+        self.write_json(
+            200,
+            {
+                "success": True,
+                "message": "保存成功",
+                "user": {
+                    "account": account,
+                    "userName": user_name,
+                    "description": description,
+                },
+            },
+        )
 
 
 def create_server(host="127.0.0.1", port=8080):

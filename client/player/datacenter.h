@@ -27,6 +27,7 @@ struct VideoInfo {
 struct UserInfo {
     QString userName;
     QString account;
+    QString description;
 };
 
 // 这是什么：一条视频评论在客户端中的结构化数据。
@@ -74,6 +75,12 @@ public:
     // 什么时候调用：Login::loginSuccess 触发后，player::updateLoginState() 接收到用户信息时调用。
     // 和谁配合：currentUser() 和 isLoggedIn() 让页面后续都从同一个地方读取登录状态。
     void setCurrentUser(const QString &userName, const QString &account);
+
+    // 这是什么：用接口返回的完整资料替换当前用户信息。
+    // 为什么能实现：UserInfo 同时包含账号、昵称和简介，可一次更新避免页面读到新旧混合状态。
+    // 什么时候调用：个人资料读取或修改接口成功后调用。
+    // 和谁配合：ApiClient 提供 UserInfo，player.cpp 随后读取并刷新“我的”页面。
+    void setCurrentUser(const UserInfo &user);
 
     // 这是什么：读取当前登录用户信息。
     // 为什么能实现：setCurrentUser() 会把最近一次登录成功的 userName/account 写入 m_currentUser。

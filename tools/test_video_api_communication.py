@@ -274,6 +274,57 @@ def main():
 
         print("OK: video favorite communication test passed")
 
+        with urllib.request.urlopen(
+            f"{base_url}/users/profile?account=bit-user-001",
+            timeout=3,
+        ) as response:
+            initial_profile = json.loads(response.read().decode("utf-8"))
+        assert initial_profile["success"] is True, "profile should load for known account"
+        assert initial_profile["user"]["userName"] == "BIT 用户", "profile should return current name"
+
+        updated_profile = post_json(
+            f"{base_url}/users/profile",
+            {
+                "account": "bit-user-001",
+                "userName": "BIT 新昵称",
+                "description": "这是修改后的个人简介",
+            },
+        )
+        assert updated_profile["success"] is True, "profile update should succeed"
+        assert updated_profile["user"]["userName"] == "BIT 新昵称", "profile should return updated name"
+
+        with urllib.request.urlopen(
+            f"{base_url}/users/profile?account=bit-user-001",
+            timeout=3,
+        ) as response:
+            reloaded_profile = json.loads(response.read().decode("utf-8"))
+        assert reloaded_profile["user"]["description"] == "这是修改后的个人简介", "updated profile should persist in memory"
+
+        empty_profile_name = post_json(
+            f"{base_url}/users/profile",
+            {"account": "bit-user-001", "userName": "", "description": "invalid"},
+        )
+        assert empty_profile_name["success"] is False, "empty profile name should fail"
+
+        with urllib.request.urlopen(
+            f"{base_url}/users/profile?account=missing-user",
+            timeout=3,
+        ) as response:
+            missing_profile = json.loads(response.read().decode("utf-8"))
+        assert missing_profile["success"] is False, "unknown profile should fail"
+
+        restored_profile = post_json(
+            f"{base_url}/users/profile",
+            {
+                "account": "bit-user-001",
+                "userName": "BIT 用户",
+                "description": "热爱视频，也热爱写代码。",
+            },
+        )
+        assert restored_profile["success"] is True, "profile fixture should restore for later login tests"
+
+        print("OK: /users/profile communication test passed")
+
         with urllib.request.urlopen(f"{base_url}/videos/play-url", timeout=3) as response:
             play_url_body = response.read().decode("utf-8")
             play_url = json.loads(play_url_body)

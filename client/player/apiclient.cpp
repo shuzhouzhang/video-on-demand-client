@@ -33,6 +33,19 @@ VideoInfo videoInfoFromJsonObject(const QJsonObject &obj)
 
     return video;
 }
+
+UserInfo userInfoFromJsonObject(const QJsonObject &obj)
+{
+    // 这是什么：把个人资料 JSON 转换成 UserInfo。
+    // 为什么能实现：接口字段与 UserInfo 的账号、昵称和简介一一对应。
+    // 什么时候调用：个人资料 GET/POST 成功响应需要交给页面时调用。
+    // 和谁配合：DataCenter 保存结果，player.cpp 更新“我的”页面。
+    UserInfo user;
+    user.account = obj["account"].toString();
+    user.userName = obj["userName"].toString();
+    user.description = obj["description"].toString();
+    return user;
+}
 }
 
 ApiClient::ApiClient(QObject *parent)
@@ -871,6 +884,96 @@ void ApiClient::fetchFavoriteVideos()
             }
         }
         emit favoriteVideosLoaded(videos);
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::fetchUserProfile()
+{
+    // 这是什么：读取当前账号的个人资料。
+    // 为什么能实现：账号作为 query 参数发送，后端可在 USERS 中找到对应资料。
+    // 什么时候调用：登录成功后需要用后端最新资料刷新“我的”页面时调用。
+    // 和谁配合：userProfileLoaded 返回 UserInfo，DataCenter 保存共享状态。
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    if (currentUser.account.isEmpty()) {
+        emit userProfileFailed("请先登录后查看资料");
+        return;
+    }
+
+    QUrl url = m_userProfileUrl;
+    QUrlQuery query;
+    query.addQueryItem("account", currentUser.account);
+    url.setQuery(query);
+    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit userProfileFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit userProfileFailed(obj["message"].toString("个人资料加载失败"));
+        } else {
+            const UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            if (user.account.isEmpty() || user.userName.isEmpty()) {
+                emit userProfileFailed("个人资料响应缺少必要字段");
+            } else {
+                emit userProfileLoaded(user);
+            }
+        }
+        reply->deleteLater();
+    });
+}
+
+void ApiClient::updateUserProfile(const QString &userName, const QString &description)
+{
+    // 这是什么：提交当前用户修改后的昵称和简介。
+    // 为什么能实现：POST JSON 携带账号定位用户，后端校验后覆盖对应资料字段。
+    // 什么时候调用：ProfileDialog 发出 saveRequested 时调用。
+    // 和谁配合：userProfileUpdated 返回最终资料，页面和 DataCenter 同步更新。
+    const UserInfo currentUser = DataCenter::instance().currentUser();
+    const QString trimmedName = userName.trimmed();
+    const QString trimmedDescription = description.trimmed();
+    if (currentUser.account.isEmpty()) {
+        emit userProfileFailed("请先登录后修改资料");
+        return;
+    }
+    if (trimmedName.isEmpty() || trimmedName.size() > 20) {
+        emit userProfileFailed("昵称需为 1 到 20 个字符");
+        return;
+    }
+    if (trimmedDescription.size() > 100) {
+        emit userProfileFailed("个人简介不能超过 100 个字符");
+        return;
+    }
+
+    QNetworkRequest request(m_userProfileUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject payload;
+    payload["account"] = currentUser.account;
+    payload["userName"] = trimmedName;
+    payload["description"] = trimmedDescription;
+    QNetworkReply *reply = m_networkManager->post(
+        request,
+        QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit userProfileFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (!obj["success"].toBool(false)) {
+            emit userProfileFailed(obj["message"].toString("个人资料保存失败"));
+        } else {
+            const UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            if (user.account.isEmpty() || user.userName.isEmpty()) {
+                emit userProfileFailed("个人资料响应缺少必要字段");
+            } else {
+                emit userProfileUpdated(user);
+            }
+        }
         reply->deleteLater();
     });
 }

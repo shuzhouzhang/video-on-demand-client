@@ -127,6 +127,17 @@ void DataCenter::setCurrentUser(const QString &userName, const QString &account)
     m_currentUser.account = account.trimmed();
 }
 
+void DataCenter::setCurrentUser(const UserInfo &user)
+{
+    // 这是什么：保存接口确认后的完整当前用户资料。
+    // 为什么能实现：资料字段在写入前统一去掉首尾空格，DataCenter 继续作为页面共享状态源。
+    // 什么时候调用：fetchUserProfile() 或 updateUserProfile() 成功后由 player.cpp 调用。
+    // 和谁配合：currentUser() 把最新昵称、账号和简介提供给界面及其它接口。
+    m_currentUser.userName = user.userName.trimmed();
+    m_currentUser.account = user.account.trimmed();
+    m_currentUser.description = user.description.trimmed();
+}
+
 UserInfo DataCenter::currentUser() const
 {
     // 这是什么：返回当前登录用户。

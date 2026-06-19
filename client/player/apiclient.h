@@ -149,6 +149,18 @@ public:
     // 和谁配合：player.cpp 收到 favoriteVideosLoaded 后在“我的”页面渲染 VideoBox。
     void fetchFavoriteVideos();
 
+    // 这是什么：读取当前登录用户的个人资料。
+    // 为什么能实现：从 DataCenter 读取账号作为 GET 参数，后端返回昵称和简介。
+    // 什么时候调用：登录成功后或进入“我的”页面需要刷新资料时调用。
+    // 和谁配合：userProfileLoaded 把 UserInfo 交给 player.cpp 和 DataCenter。
+    void fetchUserProfile();
+
+    // 这是什么：修改当前登录用户的昵称和简介。
+    // 为什么能实现：把 account/userName/description 作为 JSON POST，后端校验并返回最终资料。
+    // 什么时候调用：ProfileDialog 校验输入并点击保存时调用。
+    // 和谁配合：userProfileUpdated 通知 player.cpp 刷新“我的”页面。
+    void updateUserProfile(const QString &userName, const QString &description);
+
 signals:
     // 这是什么：视频接口请求成功后的通知信号。
     // 为什么能实现：Qt 信号槽允许网络回调完成后把 QList<VideoInfo> 异步交给页面。
@@ -312,6 +324,24 @@ signals:
     // 和谁配合：PlayerPage/player.cpp 只提示或记录错误，不影响其它功能。
     void favoriteRequestFailed(const QString &message);
 
+    // 这是什么：个人资料读取成功后的通知。
+    // 为什么能实现：接口响应字段可以直接转成 UserInfo。
+    // 什么时候触发：GET /users/profile 成功时触发。
+    // 和谁配合：player.cpp 写入 DataCenter 并刷新页面。
+    void userProfileLoaded(const UserInfo &user);
+
+    // 这是什么：个人资料修改成功后的通知。
+    // 为什么能实现：后端返回最终保存结果，页面以它为准更新状态。
+    // 什么时候触发：POST /users/profile 成功时触发。
+    // 和谁配合：ProfileDialog 恢复按钮，player.cpp 更新展示。
+    void userProfileUpdated(const UserInfo &user);
+
+    // 这是什么：个人资料请求失败后的通知。
+    // 为什么能实现：未登录、校验错误和网络错误统一转换成 message。
+    // 什么时候触发：读取或修改资料失败时触发。
+    // 和谁配合：player.cpp/ProfileDialog 展示错误并保留原资料。
+    void userProfileFailed(const QString &message);
+
 private:
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
@@ -399,6 +429,12 @@ private:
     QUrl m_favoriteUrl = QUrl("http://127.0.0.1:8080/videos/favorite");
     QUrl m_unfavoriteUrl = QUrl("http://127.0.0.1:8080/videos/unfavorite");
     QUrl m_favoriteVideosUrl = QUrl("http://127.0.0.1:8080/users/favorites");
+
+    // 这是什么：个人资料读取和修改共用地址。
+    // 为什么这样做：GET 负责读取，POST 负责更新同一个用户资源。
+    // 什么时候使用：fetchUserProfile() 和 updateUserProfile() 发请求时使用。
+    // 和谁配合：mock server 的 USERS 内存数据。
+    QUrl m_userProfileUrl = QUrl("http://127.0.0.1:8080/users/profile");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。
