@@ -4,8 +4,8 @@ cmake_minimum_required(VERSION 3.19)
 project(player LANGUAGES CXX)
 
 # 查找本项目需要用到的 Qt 模块。
-# Core 是 Qt 基础模块，Widgets 提供 QWidget/QPushButton 等界面控件，Svg 用于 SVG 资源支持。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg)
+# Core 是 Qt 基础模块，Widgets 提供 QWidget/QPushButton 等界面控件，Network 负责 HTTP 请求，Svg 用于 SVG 资源支持。
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Network Svg)
 
 qt_standard_project_setup()
 
@@ -24,10 +24,13 @@ qt_add_executable(player
     # 启动页、自定义左侧导航按钮、资源文件和工具函数。
     startuppage.h startuppage.cpp
     imageRes.qrc
+    apiclient.h apiclient.cpp
     pageswitchbutton.h pageswitchbutton.cpp
     videobox.h videobox.cpp videobox.ui
     datacenter.h datacenter.cpp
     bulletscreenitem.h bulletscreenitem.cpp
+    commentdialog.h commentdialog.cpp
+    profiledialog.h profiledialog.cpp
     playerpage.h playerpage.cpp playerpage.ui
     login.h login.cpp login.ui
     uploadvideopage.h uploadvideopage.cpp uploadvideopage.ui
@@ -49,6 +52,7 @@ target_link_libraries(player
     PRIVATE
         Qt::Core
         Qt::Widgets
+        Qt::Network
         Qt::Svg
         ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv.dll.a
 )

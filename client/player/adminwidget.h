@@ -16,6 +16,9 @@ class QLabel;
 class QPushButton;
 class QTableWidget;
 class QVBoxLayout;
+class ApiClient;
+struct AdminReviewInfo;
+struct AdminUserInfo;
 
 class AdminWidget : public QWidget
 {
@@ -57,11 +60,14 @@ private:
     void updatePagination(PageState &state, bool isCheckPage);
     void switchPage(PageState &state, bool isCheckPage, int page);
     void appendActionButtons(QTableWidget *table, int row, const QStringList &actions, const QString &target);
+    void setAdminReviews(const QList<AdminReviewInfo> &reviews);
+    void setAdminUsers(const QList<AdminUserInfo> &users);
 
 private:
     Ui::AdminWidget *ui;
     PageState m_checkPageState;
     PageState m_rolePageState;
+    ApiClient *m_apiClient = nullptr;
 };
 
 #endif // ADMINWIDGET_H

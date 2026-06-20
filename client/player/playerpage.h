@@ -1,5 +1,5 @@
 // playerpage.h 声明视频播放页组件。
-// PlayerPage 是一个独立窗口，第一版只承载播放页静态壳子和基础按钮行为。
+// PlayerPage 是独立播放窗口，承载 libmpv、详情、互动、评论和播放记录接口协作。
 #ifndef PLAYERPAGE_H
 #define PLAYERPAGE_H
 
@@ -18,6 +18,10 @@ class QMenu;
 class QPushButton;
 class QShowEvent;
 class QSlider;
+class QTimer;
+class ApiClient;
+class CommentDialog;
+struct VideoInfo;
 
 namespace Ui {
 class PlayerPage;
@@ -28,7 +32,8 @@ class PlayerPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit PlayerPage(const QString &title,
+    explicit PlayerPage(const QString &videoId,
+                        const QString &title,
                         const QString &userName,
                         const QString &date,
                         const QString &duration,
@@ -45,7 +50,8 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
-    void initUI(const QString &title,
+    void initUI(const QString &videoId,
+                const QString &title,
                 const QString &userName,
                 const QString &date,
                 const QString &duration,
@@ -57,6 +63,7 @@ private:
     void initBarrageControls();
     void updatePlayButton();
     void updateLikeButton();
+    void updateFavoriteButton();
     void updateSpeedButton();
     void updateVolumeLabel();
     void updateBarrageButton();
@@ -69,6 +76,10 @@ private:
     void showBarragesAt(int seconds);
     void showBarrageText(const QString &text, int trackIndex = -1);
     QFrame *barrageTrackForIndex(int index) const;
+    void startPlayback(const QString &playUrl);
+    void applyVideoDetail(const VideoInfo &video);
+    void applyPendingWatchProgress();
+    void submitWatchProgress();
     static QString formatSeconds(int seconds);
 
 private:
@@ -76,20 +87,26 @@ private:
     bool m_isDragging = false;
     bool m_isPlaying = false;
     bool m_isLiked = false;
+    bool m_isFavorited = false;
     bool m_isSliderPressed = false;
     double m_playSpeed = 1.0;
     int m_volume = 60;
     int m_durationSeconds = 0;
     int m_currentPlaySeconds = 0;
+    int m_pendingSeekSeconds = -1;
     int m_nextBarrageTrack = 0;
     QPoint m_dragOffset;
+    QString m_videoId;
     QString m_title;
     QString m_videoKey;
     QMenu *m_speedMenu = nullptr;
     QWidget *m_volumePanel = nullptr;
     QSlider *m_volumeSlider = nullptr;
     QLabel *m_volumeValueLabel = nullptr;
+    ApiClient *m_apiClient = nullptr;
+    CommentDialog *m_commentDialog = nullptr;
     MpvPlayer *m_mpvPlayer = nullptr;
+    QTimer *m_watchProgressTimer = nullptr;
     bool m_isBarrageEnabled = true;
     QSet<int> m_triggeredBarrageSeconds;
     QWidget *m_barrageLayer = nullptr;

@@ -10,6 +10,7 @@ class QMouseEvent;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class ApiClient;
 
 namespace Ui {
 class Login;
@@ -27,7 +28,7 @@ public:
     void reset();
 
 signals:
-    // 第一版静态登录不接后端，账号和密码通过前端基础校验后就认为登录成功。
+    // 密码和邮箱验证码都会先做前端格式校验，再通过 ApiClient 请求后端确认登录结果。
     void loginSuccess(const QString &userName, const QString &account);
 
 protected:
@@ -45,6 +46,10 @@ private:
     void onLoginButtonClicked();
     void onRegisterButtonClicked();
     void onAuthcodeButtonClicked();
+    void onLoginSucceeded(const QString &userName, const QString &account);
+    void onLoginFailed(const QString &message);
+    void onEmailCodeSent(const QString &authcodeId, const QString &debugCode);
+    void onEmailCodeFailed(const QString &message);
     void switchMode(Mode mode);
     void clearInputs();
     void refreshModeButtons();
@@ -58,10 +63,10 @@ private:
     QPushButton *m_authcodeBtn = nullptr;
     QLabel *m_authcodeLabel = nullptr;
     QLineEdit *m_authcodeEdit = nullptr;
+    ApiClient *m_apiClient = nullptr;
     QString m_authcodeId;
-    QString m_authcodeValue;
-    QString m_authcodeEmail;
     Mode m_mode = Mode::Email;
+    bool m_isLoginRequesting = false;
     bool m_isDragging = false;
     QPoint m_dragOffset;
 };

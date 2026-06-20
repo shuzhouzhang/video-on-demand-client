@@ -1,9 +1,10 @@
 // uploadvideopage.h 声明上传视频页面组件。
-// UploadVideoPage 负责承载上传视频的静态表单流程，后续接接口时再替换发布逻辑。
+// UploadVideoPage 负责承载上传视频表单，并把元数据、视频和封面提交到上传接口。
 #ifndef UPLOADVIDEOPAGE_H
 #define UPLOADVIDEOPAGE_H
 
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 namespace Ui {
@@ -12,6 +13,7 @@ class UploadVideoPage;
 
 class QPushButton;
 class QComboBox;
+class ApiClient;
 
 class UploadVideoPage : public QWidget
 {
@@ -36,13 +38,19 @@ private:
     void chooseVideo();
     void chooseCover();
     void commitUpload();
+    void onUploadSucceeded(const QString &message);
+    void onUploadFailed(const QString &message);
     int selectedTagCount() const;
+    QStringList selectedTags() const;
+    void setCommitButtonRequesting(bool requesting);
 
 private:
     Ui::UploadVideoPage *ui;
     QString m_videoPath;
     QString m_coverPath;
     QComboBox *m_tagCombo = nullptr;
+    ApiClient *m_apiClient = nullptr;
+    bool m_isUploadRequesting = false;
 };
 
 #endif // UPLOADVIDEOPAGE_H

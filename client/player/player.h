@@ -8,8 +8,13 @@
 #include <QString>
 #include <QWidget>
 
+#include "datacenter.h"
+
+class ApiClient;
 class Login;
+class ProfileDialog;
 class QEvent;
+class QGridLayout;
 class QLayout;
 class QMouseEvent;
 class QObject;
@@ -44,10 +49,14 @@ private:
     void refreshHomeCategoryButtons();
     void refreshHomeTagButtons();
     void renderHomeVideos();
+    void setHomeVideos(const QList<VideoInfo> &videos);
+    void searchHomeVideos();
+    void renderMyVideoList(const QList<VideoInfo> &videos, const QString &title, const QString &emptyText);
     void selectHomeCategory(const QString &category);
     void clearLayout(QLayout *layout);
     void showLoginWindow();
     void updateLoginState(const QString &userName, const QString &account);
+    void applyUserProfile(const UserInfo &user);
 
 private:
     // ui 指向 Qt Designer 生成的界面对象，控件都从这里访问。
@@ -60,15 +69,16 @@ private:
     // 窗口移动时要靠它计算新位置。
     QPoint m_dragOffset;
 
-    // 第一版登录只保存前端状态，后续接后端时再替换为真实 session/token。
-    bool m_isLoggedIn = false;
-    QString m_loginUserName;
-    QString m_loginAccount;
     Login *m_loginWindow = nullptr;
+    ApiClient *m_apiClient = nullptr;
+    ProfileDialog *m_profileDialog = nullptr;
+    QList<VideoInfo> m_homeVideos;
     QString m_selectedCategory;
     QString m_selectedTag;
+    QString m_searchKeyword;
     QList<QPushButton *> m_categoryButtons;
     QList<QPushButton *> m_tagButtons;
+    QGridLayout *m_myVideoGridLayout = nullptr;
 };
 
 #endif // PLAYER_H

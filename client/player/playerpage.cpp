@@ -1,7 +1,8 @@
-// playerpage.cpp 实现视频播放页的静态 UI 和基础交互。
-// 播放页已接入 libmpv，负责播放控制、时间同步和视频信息展示。
+// playerpage.cpp 实现 libmpv 播放控制，并协调详情、弹幕、点赞、收藏、评论和播放记录接口。
 #include "playerpage.h"
+#include "apiclient.h"
 #include "bulletscreenitem.h"
+#include "commentdialog.h"
 #include "datacenter.h"
 #include "ui_playerpage.h"
 #include "util.h"
@@ -14,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QShortcut>
@@ -23,9 +25,11 @@
 #include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QStringList>
+#include <QTimer>
 #include <QVBoxLayout>
 
-PlayerPage::PlayerPage(const QString &title,
+PlayerPage::PlayerPage(const QString &videoId,
+                       const QString &title,
                        const QString &userName,
                        const QString &date,
                        const QString &duration,
@@ -35,7 +39,7 @@ PlayerPage::PlayerPage(const QString &title,
     : QWidget(parent)
     , ui(new Ui::PlayerPage)
 {
-    initUI(title, userName, date, duration, playCount, likeCount);
+    initUI(videoId, title, userName, date, duration, playCount, likeCount);
 }
 
 PlayerPage::~PlayerPage()
@@ -95,13 +99,15 @@ void PlayerPage::showEvent(QShowEvent *event)
 
 void PlayerPage::hideEvent(QHideEvent *event)
 {
+    submitWatchProgress();
     if (m_barrageLayer) {
         m_barrageLayer->hide();
     }
     QWidget::hideEvent(event);
 }
 
-void PlayerPage::initUI(const QString &title,
+void PlayerPage::initUI(const QString &videoId,
+                        const QString &title,
                         const QString &userName,
                         const QString &date,
                         const QString &duration,
@@ -110,6 +116,7 @@ void PlayerPage::initUI(const QString &title,
 {
     ui->setupUi(this);
 
+    m_videoId = videoId;
     m_title = title;
     setFixedSize(1450, 860);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
@@ -126,6 +133,10 @@ void PlayerPage::initUI(const QString &title,
     ui->videoDesc->setText("简介：这是一条视频简介占位内容，后续接入真实视频数据后会展示作者填写的视频说明。");
 
     m_mpvPlayer = new MpvPlayer(ui->videoScreen, this);
+    m_apiClient = new ApiClient(this);
+    m_commentDialog = new CommentDialog(this);
+    m_watchProgressTimer = new QTimer(this);
+    m_watchProgressTimer->setInterval(5000);
 
     initSpeedMenu();
     initVolumePanel();
@@ -133,6 +144,7 @@ void PlayerPage::initUI(const QString &title,
     initBarrageControls();
     updatePlayButton();
     updateLikeButton();
+    updateFavoriteButton();
     updateSpeedButton();
     updateVolumeLabel();
     updateBarrageButton();
@@ -148,17 +160,96 @@ void PlayerPage::initUI(const QString &title,
         m_isPlaying = !m_isPlaying;
         if (m_isPlaying) {
             m_mpvPlayer->play();
+            if (m_watchProgressTimer) {
+                m_watchProgressTimer->start();
+            }
         } else {
             m_mpvPlayer->pause();
+            if (m_watchProgressTimer) {
+                m_watchProgressTimer->stop();
+            }
+            submitWatchProgress();
         }
         updatePlayButton();
         LOG() << "播放页切换播放状态:" << m_title << (m_isPlaying ? "播放" : "暂停");
     });
 
     connect(ui->likeBtn, &QPushButton::clicked, this, [this]() {
-        m_isLiked = !m_isLiked;
-        updateLikeButton();
-        LOG() << "播放页切换点赞状态:" << m_title << (m_isLiked ? "已点赞" : "取消点赞");
+        // 这是什么：把播放页点赞按钮从本地切换改成接口提交。
+        // 为什么能实现：PlayerPage 已保存 m_videoId，ApiClient 可以把 videoId/account POST 给 mock/后端。
+        // 什么时候调用：用户点击播放页点赞按钮时调用。
+        // 和谁配合：videoLikeChanged 成功回调负责真正更新 m_isLiked、按钮样式和点赞数。
+        if (m_videoId.isEmpty()) {
+            LOG() << "点赞失败：视频 id 为空";
+            return;
+        }
+
+        if (m_isLiked) {
+            m_apiClient->unlikeVideo(m_videoId);
+        } else {
+            m_apiClient->likeVideo(m_videoId);
+        }
+    });
+
+    connect(ui->favoriteBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：播放页收藏按钮的业务入口。
+        // 为什么能实现：m_isFavorited 保存当前状态，点击后选择收藏或取消收藏接口。
+        // 什么时候调用：用户点击星标收藏按钮时调用。
+        // 和谁配合：DataCenter 判断登录，videoFavoriteChanged 成功后真正更新页面状态。
+        if (!DataCenter::instance().isLoggedIn()) {
+            QMessageBox::information(this, QStringLiteral("需要登录"), QStringLiteral("请先登录后再收藏视频"));
+            return;
+        }
+        if (m_isFavorited) {
+            m_apiClient->unfavoriteVideo(m_videoId);
+        } else {
+            m_apiClient->favoriteVideo(m_videoId);
+        }
+    });
+
+    ui->commentBtn->setStyleSheet(R"(
+        QPushButton#commentBtn {
+            border: 1px solid #d7e0e7;
+            border-radius: 6px;
+            background: #ffffff;
+            color: #334155;
+        }
+        QPushButton#commentBtn:hover {
+            border-color: #26bff3;
+            color: #0ea5d7;
+            background: #f3fbfe;
+        }
+    )");
+    connect(ui->commentBtn, &QPushButton::clicked, this, [this]() {
+        // 这是什么：打开当前视频评论窗口并刷新评论列表。
+        // 为什么能实现：PlayerPage 已保存 videoId，ApiClient 可据此查询该视频的全部评论。
+        // 什么时候调用：用户点击播放页“评论”按钮时调用。
+        // 和谁配合：CommentDialog 展示加载状态，commentsLoaded 返回后填充列表。
+        if (m_videoId.isEmpty()) {
+            LOG() << "评论加载失败：视频 id 为空";
+            return;
+        }
+
+        m_commentDialog->setLoading(true);
+        m_commentDialog->show();
+        m_commentDialog->raise();
+        m_commentDialog->activateWindow();
+        m_apiClient->fetchComments(m_videoId);
+    });
+
+    connect(m_commentDialog, &CommentDialog::submitRequested, this, [this](const QString &content) {
+        // 这是什么：发表评论前的登录检查和接口调用入口。
+        // 为什么能实现：DataCenter 集中保存当前用户，只有登录状态有效时才允许 ApiClient 携带身份发送。
+        // 什么时候调用：评论窗口校验正文通过并发出 submitRequested 时调用。
+        // 和谁配合：CommentDialog 收集正文，ApiClient::sendComment() 完成网络提交。
+        if (!DataCenter::instance().isLoggedIn()) {
+            m_commentDialog->showError(QStringLiteral("请先登录后再发表评论"));
+            QMessageBox::information(this, QStringLiteral("需要登录"), QStringLiteral("请先登录后再发表评论"));
+            return;
+        }
+
+        m_commentDialog->setSubmitting(true);
+        m_apiClient->sendComment(m_videoId, content);
     });
 
     connect(ui->speedBtn, &QPushButton::clicked, this, [this]() {
@@ -215,14 +306,159 @@ void PlayerPage::initUI(const QString &title,
         m_isSliderPressed = false;
         m_isPlaying = false;
         m_currentPlaySeconds = m_durationSeconds;
+        if (m_watchProgressTimer) {
+            m_watchProgressTimer->stop();
+        }
         updatePlayButton();
         updateSliderPosition(m_durationSeconds);
         updateTimeLabel(m_durationSeconds);
+        submitWatchProgress();
     });
 
-    m_videoKey = "D:/video-on-demand-client/test.mp4";
-    m_mpvPlayer->startPlay(m_videoKey);
-    m_mpvPlayer->pause();
+    connect(m_watchProgressTimer, &QTimer::timeout, this, &PlayerPage::submitWatchProgress);
+
+    connect(m_apiClient, &ApiClient::playUrlLoaded, this, [this](const QString &playUrl) {
+        // 这是什么：播放页拿到接口返回的播放地址后启动 mpv。
+        // 为什么能实现：ApiClient 已确认 playUrl 非空，MpvPlayer::startPlay() 可以直接加载本地路径或后续网络地址。
+        // 什么时候调用：GET /videos/play-url 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：ApiClient 负责请求地址，startPlayback() 负责统一设置 m_videoKey 并启动播放器。
+        startPlayback(playUrl);
+        m_apiClient->fetchBarrages(m_videoId);
+    });
+    connect(m_apiClient, &ApiClient::playUrlFailed, this, [this](const QString &message) {
+        // 这是什么：播放地址接口失败后的本地回退。
+        // 为什么能实现：当前阶段仍保留 test.mp4，本地路径可保证 mock server 关闭时播放页不至于空白。
+        // 什么时候调用：网络错误、接口返回失败或 playUrl 为空时触发。
+        // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
+        LOG() << "播放地址接口请求失败，回退本地测试视频:" << message;
+        startPlayback("D:/video-on-demand-client/test.mp4");
+        m_apiClient->fetchBarrages(m_videoId);
+    });
+    connect(m_apiClient, &ApiClient::barragesLoaded, this, [this](const QHash<int, QStringList> &barragesBySecond) {
+        // 这是什么：播放页接收接口弹幕列表并写入本地缓存。
+        // 为什么能实现：ApiClient 已经按秒数整理好弹幕，DataCenter 可以直接用 videoId 批量保存。
+        // 什么时候调用：GET /videos/barrages 成功后由 Qt 信号槽触发。
+        // 和谁配合：showBarragesAt() 后续按播放秒数从 DataCenter 读取并显示。
+        DataCenter::instance().setBarrages(m_videoId, barragesBySecond);
+        m_triggeredBarrageSeconds.clear();
+    });
+    connect(m_apiClient, &ApiClient::barrageSendSucceeded, this, [this](const QString &text, int seconds) {
+        // 这是什么：发送弹幕成功后的页面收尾。
+        // 为什么能实现：接口已确认保存成功，页面可以立即显示并把同一条写入 DataCenter 本地缓存。
+        // 什么时候调用：POST /videos/barrages 成功后由 Qt 信号槽触发。
+        // 和谁配合：DataCenter 缓存弹幕，showBarrageText() 负责把文本飘过视频区域。
+        DataCenter::instance().addBarrage(m_videoId, seconds, text);
+        if (m_isBarrageEnabled) {
+            showBarrageText(text, 0);
+            m_triggeredBarrageSeconds.insert(seconds);
+        }
+        if (m_barrageEdit) {
+            m_barrageEdit->clear();
+        }
+    });
+    connect(m_apiClient, &ApiClient::barrageRequestFailed, this, [](const QString &message) {
+        LOG() << "弹幕接口请求失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::videoDetailLoaded, this, [this](const VideoInfo &video) {
+        // 这是什么：播放页收到视频详情接口后的 UI 刷新。
+        // 为什么能实现：ApiClient 已经把 JSON 转成 VideoInfo，页面只需要把字段填到现有控件。
+        // 什么时候调用：GET /videos/detail?id=... 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：VideoBox 提供 videoId，ApiClient 请求详情，applyVideoDetail() 负责统一更新页面文字。
+        applyVideoDetail(video);
+    });
+    connect(m_apiClient, &ApiClient::videoDetailFailed, this, [](const QString &message) {
+        LOG() << "视频详情接口请求失败，保留卡片传入的信息:" << message;
+    });
+    connect(m_apiClient, &ApiClient::videoLikeChanged, this, [this](bool liked, const QString &likeCount) {
+        // 这是什么：点赞/取消点赞接口成功后的页面收尾。
+        // 为什么能实现：接口返回的是最终 liked 和 likeCount，页面直接按最终结果刷新即可。
+        // 什么时候调用：POST /videos/like 或 /videos/unlike 成功后由 Qt 信号槽触发。
+        // 和谁配合：ApiClient 负责网络请求，updateLikeButton() 负责把状态画到按钮上。
+        m_isLiked = liked;
+        ui->likeNum->setText(likeCount);
+        updateLikeButton();
+        LOG() << "播放页点赞状态已同步:" << m_title << (m_isLiked ? "已点赞" : "未点赞") << likeCount;
+    });
+    connect(m_apiClient, &ApiClient::videoLikeStatusLoaded, this, [this](bool liked, const QString &likeCount) {
+        // 这是什么：播放页应用后端返回的初始点赞状态。
+        // 为什么能实现：状态接口同时返回关系和数量，页面无需使用默认未点赞假设。
+        // 什么时候调用：GET /videos/like-status 成功后调用。
+        // 和谁配合：updateLikeButton() 绘制按钮，likeNum 展示服务端数量。
+        m_isLiked = liked;
+        ui->likeNum->setText(likeCount);
+        updateLikeButton();
+    });
+    connect(m_apiClient, &ApiClient::videoLikeFailed, this, [](const QString &message) {
+        LOG() << "点赞接口请求失败，保留当前点赞状态:" << message;
+    });
+    connect(m_apiClient, &ApiClient::watchProgressLoaded, this, [this](int seconds) {
+        // 这是什么：播放页收到上次播放进度后的处理。
+        // 为什么能实现：ApiClient 已把接口返回的 seconds 转成整数，页面只需缓存并等 mpv 加载后 seek。
+        // 什么时候调用：GET /videos/watch-progress 成功后由 Qt 信号槽触发。
+        // 和谁配合：startPlayback() 加载视频后调用 applyPendingWatchProgress() 真正跳转。
+        m_pendingSeekSeconds = qMax(0, seconds);
+        applyPendingWatchProgress();
+    });
+    connect(m_apiClient, &ApiClient::watchProgressSaved, this, []() {
+        LOG() << "播放记录已保存";
+    });
+    connect(m_apiClient, &ApiClient::watchProgressFailed, this, [](const QString &message) {
+        LOG() << "播放记录接口请求失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::commentsLoaded, this, [this](const QList<CommentInfo> &comments) {
+        // 这是什么：评论列表接口成功后的界面刷新。
+        // 为什么能实现：ApiClient 已把 JSON 数组解析成 CommentInfo 列表，窗口可直接渲染。
+        // 什么时候调用：GET /videos/comments 成功返回时由 Qt 信号槽触发。
+        // 和谁配合：CommentDialog::setComments() 按接口顺序展示最新评论。
+        m_commentDialog->setComments(comments);
+    });
+    connect(m_apiClient, &ApiClient::commentSent, this, [this](const CommentInfo &comment) {
+        // 这是什么：发表评论成功后的页面收尾。
+        // 为什么能实现：接口返回完整评论对象，直接插到列表顶部即可立即反映保存结果。
+        // 什么时候调用：POST /videos/comments 成功后由 Qt 信号槽触发。
+        // 和谁配合：CommentDialog 清空输入、恢复按钮并显示最新评论。
+        m_commentDialog->prependComment(comment);
+        LOG() << "评论发送成功:" << comment.content;
+    });
+    connect(m_apiClient, &ApiClient::commentRequestFailed, this, [this](const QString &message) {
+        // 这是什么：评论接口失败后的局部错误处理。
+        // 为什么这样做：错误只显示在评论窗口中，不改变播放器、弹幕或点赞状态。
+        // 什么时候调用：评论 GET/POST 遇到网络或业务错误时调用。
+        // 和谁配合：CommentDialog 恢复控件并显示错误，用户可继续观看或重试。
+        m_commentDialog->showError(message);
+        LOG() << "评论接口请求失败:" << message;
+    });
+    connect(m_apiClient, &ApiClient::videoFavoriteStatusLoaded, this, [this](bool favorited) {
+        // 这是什么：播放页初始化收藏状态。
+        // 为什么能实现：后端返回当前账号与视频的真实关系，页面不需要默认猜测。
+        // 什么时候调用：GET /videos/favorite-status 成功后调用。
+        // 和谁配合：updateFavoriteButton() 把布尔状态转换成空心或实心星标。
+        m_isFavorited = favorited;
+        updateFavoriteButton();
+    });
+    connect(m_apiClient, &ApiClient::videoFavoriteChanged, this, [this](bool favorited) {
+        // 这是什么：收藏或取消收藏成功后的页面收尾。
+        // 为什么能实现：接口返回最终状态，只有成功后才改变本地按钮，避免网络失败造成假状态。
+        // 什么时候调用：POST /videos/favorite 或 /videos/unfavorite 成功时调用。
+        // 和谁配合：ApiClient 修改后端关系，updateFavoriteButton() 更新用户看到的结果。
+        m_isFavorited = favorited;
+        updateFavoriteButton();
+        LOG() << "视频收藏状态已同步:" << m_videoId << favorited;
+    });
+    connect(m_apiClient, &ApiClient::favoriteRequestFailed, this, [](const QString &message) {
+        LOG() << "收藏接口请求失败:" << message;
+    });
+
+    if (!m_videoId.isEmpty()) {
+        m_apiClient->fetchVideoDetail(m_videoId);
+        m_apiClient->fetchWatchProgress(m_videoId);
+        m_apiClient->fetchVideoLikeStatus(m_videoId);
+        if (DataCenter::instance().isLoggedIn()) {
+            m_apiClient->fetchFavoriteStatus(m_videoId);
+        }
+    }
+    m_apiClient->fetchPlayUrl(m_videoId);
+
     m_mpvPlayer->setVolume(m_volume);
     m_mpvPlayer->setPlaySpeed(m_playSpeed);
 }
@@ -504,6 +740,19 @@ void PlayerPage::updateVolumeLabel()
     }
 }
 
+void PlayerPage::updateFavoriteButton()
+{
+    // 这是什么：根据当前收藏状态绘制星标按钮。
+    // 为什么能实现：空心星和实心星分别表达未收藏/已收藏，颜色同步加强状态识别。
+    // 什么时候调用：播放页初始化、收藏状态查询成功或收藏关系修改成功后调用。
+    // 和谁配合：m_isFavorited 保存状态，ApiClient 的收藏信号负责改变它。
+    ui->favoriteBtn->setText(m_isFavorited ? QStringLiteral("★") : QStringLiteral("☆"));
+    ui->favoriteBtn->setToolTip(m_isFavorited ? QStringLiteral("取消收藏") : QStringLiteral("收藏"));
+    ui->favoriteBtn->setStyleSheet(m_isFavorited
+                                       ? QStringLiteral("QPushButton#favoriteBtn { border: none; background: transparent; color: #f59e0b; font-size: 24px; }")
+                                       : QStringLiteral("QPushButton#favoriteBtn { border: none; background: transparent; color: #64748b; font-size: 24px; } QPushButton#favoriteBtn:hover { color: #f59e0b; }"));
+}
+
 void PlayerPage::updateBarrageButton()
 {
     if (!m_barrageToggleBtn) {
@@ -582,14 +831,11 @@ void PlayerPage::sendBarrage()
 
     const int upperBound = m_durationSeconds > 0 ? m_durationSeconds : m_currentPlaySeconds;
     const int second = qBound(0, m_currentPlaySeconds, upperBound);
-    DataCenter::instance().addBarrage(m_videoKey, second, text);
-
-    if (m_isBarrageEnabled) {
-        showBarrageText(text, 0);
-        m_triggeredBarrageSeconds.insert(second);
-    }
-
-    m_barrageEdit->clear();
+    // 这是什么：把发送弹幕从本地缓存改成接口提交。
+    // 为什么能实现：ApiClient::sendBarrage() 会把 videoId、秒数、文本和用户信息 POST 到 mock/后端。
+    // 什么时候调用：用户输入非空弹幕并点击发送或按回车时调用。
+    // 和谁配合：barrageSendSucceeded 成功回调负责显示弹幕并写入 DataCenter。
+    m_apiClient->sendBarrage(m_videoId, second, text);
 }
 
 void PlayerPage::showBarragesAt(int seconds)
@@ -599,7 +845,7 @@ void PlayerPage::showBarragesAt(int seconds)
     }
 
     m_triggeredBarrageSeconds.insert(seconds);
-    const QStringList barrages = DataCenter::instance().barragesAt(m_videoKey, seconds);
+    const QStringList barrages = DataCenter::instance().barragesAt(m_videoId, seconds);
     for (const QString &text : barrages) {
         showBarrageText(text);
     }
@@ -645,6 +891,81 @@ QFrame *PlayerPage::barrageTrackForIndex(int index) const
     default:
         return m_barrageTrackBottom;
     }
+}
+
+void PlayerPage::startPlayback(const QString &playUrl)
+{
+    // 这是什么：用指定播放地址启动 mpv，并保持进入播放页后默认暂停。
+    // 为什么能实现：MpvPlayer 已经绑定到 videoScreen，startPlay() 加载地址后 pause() 可以停在初始状态。
+    // 什么时候调用：播放地址接口成功返回，或接口失败需要回退本地 test.mp4 时调用。
+    // 和谁配合：ApiClient 提供 playUrl，MpvPlayer 使用 m_videoKey 播放，弹幕则用 m_videoId 区分视频。
+    const QString trimmedPlayUrl = playUrl.trimmed();
+    if (trimmedPlayUrl.isEmpty()) {
+        return;
+    }
+
+    m_videoKey = trimmedPlayUrl;
+    m_mpvPlayer->startPlay(m_videoKey);
+    m_mpvPlayer->pause();
+    applyPendingWatchProgress();
+}
+
+void PlayerPage::applyVideoDetail(const VideoInfo &video)
+{
+    // 这是什么：把详情接口返回的视频信息应用到播放页。
+    // 为什么能实现：VideoInfo 字段和播放页标题、作者、日期、播放量、点赞数、简介控件一一对应。
+    // 什么时候调用：ApiClient::videoDetailLoaded 信号触发后调用。
+    // 和谁配合：详情接口负责给最新数据，播放页保留原有播放、弹幕和进度逻辑不变。
+    if (!video.id.isEmpty()) {
+        m_videoId = video.id;
+    }
+    if (!video.title.isEmpty()) {
+        m_title = video.title;
+        setWindowTitle(video.title);
+        ui->videoTitle->setText(video.title);
+    }
+
+    ui->userName->setText(video.userName);
+    ui->uploadDate->setText(video.date);
+    ui->playNum->setText(video.playCount);
+    ui->likeNum->setText(video.likeCount);
+    if (!video.description.trimmed().isEmpty()) {
+        ui->videoDesc->setText(QStringLiteral("简介：") + video.description.trimmed());
+    }
+}
+
+void PlayerPage::applyPendingWatchProgress()
+{
+    // 这是什么：把接口返回的上次播放秒数应用到 mpv。
+    // 为什么能实现：播放地址加载后 m_videoKey 非空，MpvPlayer 可以通过 setCurrentPlayPosition() 执行 seek。
+    // 什么时候调用：播放记录先返回或播放地址先返回都可能发生，所以两个回调都会尝试调用它。
+    // 和谁配合：watchProgressLoaded 保存待跳转秒数，startPlayback 确认 mpv 已加载视频。
+    if (m_pendingSeekSeconds <= 0 || m_videoKey.isEmpty() || !m_mpvPlayer) {
+        return;
+    }
+
+    const int targetSeconds = m_durationSeconds > 0
+                                  ? qBound(0, m_pendingSeekSeconds, m_durationSeconds)
+                                  : m_pendingSeekSeconds;
+    m_currentPlaySeconds = targetSeconds;
+    m_mpvPlayer->setCurrentPlayPosition(targetSeconds);
+    updateTimeLabel(targetSeconds);
+    updateSliderPosition(targetSeconds);
+    m_pendingSeekSeconds = -1;
+    LOG() << "已恢复上次播放进度:" << targetSeconds;
+}
+
+void PlayerPage::submitWatchProgress()
+{
+    // 这是什么：统一提交当前视频播放进度。
+    // 为什么能实现：PlayerPage 持有 videoId 和 m_currentPlaySeconds，ApiClient 负责把它们 POST 到 mock/后端。
+    // 什么时候调用：播放定时器触发、暂停、播放结束、隐藏或关闭播放页时调用。
+    // 和谁配合：ApiClient::saveWatchProgress() 保存进度，下次 fetchWatchProgress() 可读取回来。
+    if (!m_apiClient || m_videoId.isEmpty() || m_currentPlaySeconds < 0) {
+        return;
+    }
+
+    m_apiClient->saveWatchProgress(m_videoId, m_currentPlaySeconds);
 }
 
 QString PlayerPage::formatSeconds(int seconds)

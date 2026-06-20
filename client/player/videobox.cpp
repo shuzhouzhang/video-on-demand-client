@@ -1,5 +1,5 @@
 // videobox.cpp 实现首页视频卡片组件。
-// 当前版本展示静态数据，点击封面或标题时发出信号，由主窗口决定是否打开播放页。
+// 当前版本展示 VideoInfo 数据，点击封面或标题时发出带 videoId 的信号，由主窗口打开播放页。
 #include "videobox.h"
 #include "ui_videobox.h"
 #include "util.h"
@@ -22,13 +22,15 @@ VideoBox::~VideoBox()
     delete ui;
 }
 
-void VideoBox::setVideoInfo(const QString &title,
+void VideoBox::setVideoInfo(const QString &id,
+                            const QString &title,
                             const QString &userName,
                             const QString &date,
                             const QString &duration,
                             const QString &playCount,
                             const QString &likeCount)
 {
+    m_id = id;
     m_title = title;
     m_userName = userName;
     m_date = date;
@@ -51,7 +53,7 @@ bool VideoBox::eventFilter(QObject *watched, QEvent *event)
         const auto *mouseEvent = static_cast<QMouseEvent *>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
             LOG() << "点击视频卡片:" << m_title;
-            emit videoClicked(m_title, m_userName, m_date, m_duration, m_playCount, m_likeCount);
+            emit videoClicked(m_id, m_title, m_userName, m_date, m_duration, m_playCount, m_likeCount);
             return true;
         }
     }

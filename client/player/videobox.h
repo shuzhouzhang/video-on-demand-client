@@ -17,8 +17,9 @@ public:
     explicit VideoBox(QWidget *parent = nullptr);
     ~VideoBox() override;
 
-    // 第一版使用静态展示数据，后续接真实接口时可替换成 VideoInfo 模型。
-    void setVideoInfo(const QString &title,
+    // 接收 VideoInfo 对应字段并刷新视频卡片展示。
+    void setVideoInfo(const QString &id,
+                      const QString &title,
                       const QString &userName,
                       const QString &date,
                       const QString &duration,
@@ -30,7 +31,8 @@ protected:
 
 signals:
     // VideoBox 不直接创建播放页，只把点击事件和视频数据发给外层页面处理。
-    void videoClicked(const QString &title,
+    void videoClicked(const QString &id,
+                      const QString &title,
                       const QString &userName,
                       const QString &date,
                       const QString &duration,
@@ -39,6 +41,7 @@ signals:
 
 private:
     Ui::VideoBox *ui;
+    QString m_id;
     QString m_title;
     QString m_userName;
     QString m_date;
