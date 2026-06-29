@@ -24,3 +24,5 @@ python tools\mock_videos_server.py
 ```
 
 然后再启动 Qt 客户端。`ApiClient` 会优先读取 `VIDEO_API_BASE_URL`，没有设置时才使用默认真实后端地址。
+
+真实后端返回的 `/uploads/...` 视频和头像资源会在客户端转换成完整 HTTP 地址；视频交给 mpv 播放，头像会由客户端异步下载后显示。

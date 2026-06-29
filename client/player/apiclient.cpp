@@ -59,6 +59,32 @@ QUrl endpointUrl(const QUrl &baseUrl, const QString &path)
     url.setQuery(QString());
     return url;
 }
+
+QString serverResourceUrl(const QUrl &endpointUrl, const QString &path)
+{
+    // 这是什么：把后端返回的 uploads/... 相对资源路径转成可访问的完整 HTTP URL。
+    // 为什么这样做：数据库更适合存相对路径，但 Qt 客户端下载头像/播放视频需要完整 URL。
+    // 什么时候调用：解析头像路径和上传头像返回路径时调用。
+    // 和谁配合：后端 /uploads 静态文件映射。
+    QString trimmedPath = path.trimmed();
+    if (trimmedPath.isEmpty()) {
+        return {};
+    }
+
+    const QUrl parsed(trimmedPath);
+    if (!parsed.isRelative()) {
+        return trimmedPath;
+    }
+
+    if (trimmedPath.startsWith("uploads/")) {
+        trimmedPath.prepend('/');
+    }
+    if (trimmedPath.startsWith("/uploads/")) {
+        return endpointUrl.resolved(QUrl(trimmedPath)).toString();
+    }
+
+    return path;
+}
 }
 
 ApiClient::ApiClient(QObject *parent)
@@ -1170,7 +1196,8 @@ void ApiClient::fetchUserProfile()
         if (!obj["success"].toBool(false)) {
             emit userProfileFailed(obj["message"].toString("个人资料加载失败"));
         } else {
-            const UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            user.avatarPath = serverResourceUrl(m_userProfileUrl, user.avatarPath);
             if (user.account.isEmpty() || user.userName.isEmpty()) {
                 emit userProfileFailed("个人资料响应缺少必要字段");
             } else {
@@ -1222,7 +1249,8 @@ void ApiClient::updateUserProfile(const QString &userName, const QString &descri
         if (!obj["success"].toBool(false)) {
             emit userProfileFailed(obj["message"].toString("个人资料保存失败"));
         } else {
-            const UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            UserInfo user = userInfoFromJsonObject(obj["user"].toObject());
+            user.avatarPath = serverResourceUrl(m_userProfileUrl, user.avatarPath);
             if (user.account.isEmpty() || user.userName.isEmpty()) {
                 emit userProfileFailed("个人资料响应缺少必要字段");
             } else {
@@ -1324,7 +1352,8 @@ void ApiClient::uploadAvatar(const QString &filePath)
             return;
         }
         const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
-        const QString avatarPath = obj["avatarPath"].toString();
+        const QString avatarPath = serverResourceUrl(
+            m_avatarUploadUrl, obj["avatarPath"].toString());
         if (!obj["success"].toBool(false) || avatarPath.isEmpty()) {
             emit avatarUploadFailed(obj["message"].toString("头像上传失败"));
         } else {

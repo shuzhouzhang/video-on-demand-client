@@ -25,6 +25,9 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QMenu>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -32,6 +35,7 @@
 #include <QScrollBar>
 #include <QStringList>
 #include <QStyle>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace {
@@ -175,6 +179,79 @@ void player::applyUserProfile(const UserInfo &user)
     ui->myDescLabel->setText(currentUser.description.isEmpty()
                                  ? QStringLiteral("这个人很低调，还没有填写简介")
                                  : currentUser.description);
+}
+
+void player::setMyAvatarPixmap(const QPixmap &pixmap)
+{
+    // 这是什么：统一把头像图片裁成圆形并设置到“我的”页面头像按钮。
+    // 为什么这样做：本地默认头像、mock 本地头像和真实后端远程头像都复用同一套 UI 逻辑。
+    // 什么时候调用：初始化、读取资料、上传头像成功、退出登录时调用。
+    // 和谁配合：makeCircleAvatarIcon() 负责裁剪，loadAvatar() 负责拿到图片内容。
+    ui->myAvatarBtn->setStyleSheet(R"(
+        QPushButton#myAvatarBtn {
+            border: none;
+            border-radius: 48px;
+            background: #ffffff;
+        }
+        QPushButton#myAvatarBtn:hover {
+            background: #f3fbff;
+        }
+    )");
+    ui->myAvatarBtn->setIcon(makeCircleAvatarIcon(pixmap, 96));
+    ui->myAvatarBtn->setIconSize(QSize(96, 96));
+}
+
+void player::loadAvatar(const QString &avatarPath)
+{
+    // 这是什么：按头像路径加载头像，既支持本地文件，也支持真实后端返回的 HTTP 地址。
+    // 为什么这样做：mock 返回本地临时文件路径，真实后端返回 HTTP URL，两种联调方式都要能显示。
+    // 什么时候调用：个人资料加载成功、头像上传成功后调用。
+    // 和谁配合：ApiClient 负责返回 avatarPath，本函数负责把路径变成 QPixmap。
+    const QString trimmedPath = avatarPath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        return;
+    }
+
+    const QUrl avatarUrl(trimmedPath);
+    if (!avatarUrl.isValid() || avatarUrl.scheme().isEmpty()) {
+        const QPixmap avatar(trimmedPath);
+        if (!avatar.isNull()) {
+            setMyAvatarPixmap(avatar);
+        } else {
+            LOG() << "本地头像读取失败:" << trimmedPath;
+        }
+        return;
+    }
+
+    if (avatarUrl.scheme() != "http" && avatarUrl.scheme() != "https") {
+        const QPixmap avatar(trimmedPath);
+        if (!avatar.isNull()) {
+            setMyAvatarPixmap(avatar);
+        } else {
+            LOG() << "头像路径协议暂不支持:" << trimmedPath;
+        }
+        return;
+    }
+
+    QNetworkReply *reply = m_avatarNetworkManager->get(QNetworkRequest(avatarUrl));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, trimmedPath]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            LOG() << "远程头像下载失败:" << trimmedPath << reply->errorString();
+            reply->deleteLater();
+            return;
+        }
+
+        QPixmap avatar;
+        if (!avatar.loadFromData(reply->readAll())) {
+            LOG() << "远程头像数据解析失败:" << trimmedPath;
+            reply->deleteLater();
+            return;
+        }
+
+        setMyAvatarPixmap(avatar);
+        LOG() << "远程头像加载成功:" << trimmedPath;
+        reply->deleteLater();
+    });
 }
 
 void player::clearLayout(QLayout *layout)
@@ -486,21 +563,7 @@ void player::initUI()
     ui->sysPageBtn->setIcon(QPixmap(":/images/homePage/admin.png"));
 
     // 我的页面第一版只展示静态个人中心，先用本地资源和假数据把结构搭起来。
-    auto setMyAvatar = [this](const QPixmap &pixmap) {
-        ui->myAvatarBtn->setStyleSheet(R"(
-            QPushButton#myAvatarBtn {
-                border: none;
-                border-radius: 48px;
-                background: #ffffff;
-            }
-            QPushButton#myAvatarBtn:hover {
-                background: #f3fbff;
-            }
-        )");
-        ui->myAvatarBtn->setIcon(makeCircleAvatarIcon(pixmap, 96));
-        ui->myAvatarBtn->setIconSize(QSize(96, 96));
-    };
-    setMyAvatar(QPixmap(":/images/myself/defaultAvatar.png"));
+    setMyAvatarPixmap(QPixmap(":/images/myself/defaultAvatar.png"));
     ui->myNickNameLabel->setText("点击登录");
     ui->myAccountLabel->setText("游客模式");
     ui->myDescLabel->setText("登录后可以修改资料、上传视频和查看个人内容");
@@ -533,6 +596,7 @@ void player::initUI()
     // 什么时候调用：主窗口 initUI() 初始化首页控件后调用一次。
     // 和谁配合：ApiClient 请求 mock server/真实后端，成功走 setHomeVideos()，失败只记录日志并保留本地数据。
     m_apiClient = new ApiClient(this);
+    m_avatarNetworkManager = new QNetworkAccessManager(this);
     m_profileDialog = new ProfileDialog(this);
     connect(m_apiClient, &ApiClient::videosLoaded, this, &player::setHomeVideos);
     connect(m_apiClient, &ApiClient::requestFailed, this, [this](const QString &message) {
@@ -571,17 +635,14 @@ void player::initUI()
         ui->myWorksEmptyLabel->show();
         LOG() << "我的收藏加载失败:" << message;
     });
-    connect(m_apiClient, &ApiClient::userProfileLoaded, this, [this, setMyAvatar](const UserInfo &user) {
+    connect(m_apiClient, &ApiClient::userProfileLoaded, this, [this](const UserInfo &user) {
         // 这是什么：登录后读取资料成功的处理。
         // 为什么能实现：applyUserProfile() 同时更新 DataCenter 和页面，避免保存两份不一致状态。
         // 什么时候调用：GET /users/profile 成功时调用。
         // 和谁配合：ApiClient 负责网络和解析，本函数负责界面数据落地。
         applyUserProfile(user);
         if (!user.avatarPath.isEmpty()) {
-            const QPixmap avatar(user.avatarPath);
-            if (!avatar.isNull()) {
-                setMyAvatar(avatar);
-            }
+            loadAvatar(user.avatarPath);
         }
         LOG() << "个人资料加载成功:" << user.account;
     });
@@ -616,27 +677,22 @@ void player::initUI()
         ui->myWorksEmptyLabel->show();
         LOG() << "我的视频加载失败:" << message;
     });
-    connect(m_apiClient, &ApiClient::avatarUploaded, this, [this, setMyAvatar](const QString &avatarPath) {
+    connect(m_apiClient, &ApiClient::avatarUploaded, this, [this](const QString &avatarPath) {
         // 这是什么：头像文件上传成功后的状态和界面同步。
-        // 为什么能实现：后端返回保存路径，QPixmap 可读取同一台机器 mock 保存的图片。
+        // 为什么能实现：loadAvatar 同时支持 mock 本地路径和真实后端 HTTP 头像地址。
         // 什么时候调用：POST /users/avatar 成功后调用。
         // 和谁配合：DataCenter 保存 avatarPath，个人资料接口后续可再次恢复头像。
-        const QPixmap avatar(avatarPath);
-        if (avatar.isNull()) {
-            QMessageBox::warning(this, QStringLiteral("修改头像"), QStringLiteral("上传成功，但头像文件无法读取"));
-            return;
-        }
         UserInfo user = DataCenter::instance().currentUser();
         user.avatarPath = avatarPath;
         DataCenter::instance().setCurrentUser(user);
-        setMyAvatar(avatar);
+        loadAvatar(avatarPath);
         LOG() << "头像上传并更新成功:" << avatarPath;
     });
     connect(m_apiClient, &ApiClient::avatarUploadFailed, this, [this](const QString &message) {
         QMessageBox::warning(this, QStringLiteral("修改头像"), message);
         LOG() << "头像上传失败:" << message;
     });
-    connect(m_apiClient, &ApiClient::logoutSucceeded, this, [this, setMyAvatar]() {
+    connect(m_apiClient, &ApiClient::logoutSucceeded, this, [this]() {
         // 这是什么：退出接口成功后的客户端状态清理。
         // 为什么能实现：清空 DataCenter 后，所有依赖 account 的业务都会恢复未登录判断。
         // 什么时候调用：POST /logout 返回 success=true 时调用。
@@ -650,7 +706,7 @@ void player::initUI()
         ui->myWorksEmptyLabel->setText(QStringLiteral("暂无作品"));
         ui->myWorksEmptyLabel->show();
         clearLayout(m_myVideoGridLayout);
-        setMyAvatar(QPixmap(":/images/myself/defaultAvatar.png"));
+        setMyAvatarPixmap(QPixmap(":/images/myself/defaultAvatar.png"));
         LOG() << "已退出登录并恢复游客页面";
     });
     connect(m_apiClient, &ApiClient::logoutFailed, this, [this](const QString &message) {
@@ -726,7 +782,7 @@ void player::initUI()
     connect(ui->quitBtn, &QPushButton::clicked, this, &QWidget::close);
     connect(ui->searchBtn, &QPushButton::clicked, this, &player::searchHomeVideos);
     connect(ui->searchEdit, &QLineEdit::returnPressed, this, &player::searchHomeVideos);
-    connect(ui->myAvatarBtn, &QPushButton::clicked, this, [this, setMyAvatar]() {
+    connect(ui->myAvatarBtn, &QPushButton::clicked, this, [this]() {
         if (!DataCenter::instance().isLoggedIn()) {
             showLoginWindow();
             return;

@@ -17,7 +17,9 @@ class QEvent;
 class QGridLayout;
 class QLayout;
 class QMouseEvent;
+class QNetworkAccessManager;
 class QObject;
+class QPixmap;
 class QPushButton;
 
 QT_BEGIN_NAMESPACE
@@ -57,6 +59,8 @@ private:
     void showLoginWindow();
     void updateLoginState(const QString &userName, const QString &account);
     void applyUserProfile(const UserInfo &user);
+    void setMyAvatarPixmap(const QPixmap &pixmap);
+    void loadAvatar(const QString &avatarPath);
 
 private:
     // ui 指向 Qt Designer 生成的界面对象，控件都从这里访问。
@@ -71,6 +75,7 @@ private:
 
     Login *m_loginWindow = nullptr;
     ApiClient *m_apiClient = nullptr;
+    QNetworkAccessManager *m_avatarNetworkManager = nullptr;
     ProfileDialog *m_profileDialog = nullptr;
     QList<VideoInfo> m_homeVideos;
     QString m_selectedCategory;
