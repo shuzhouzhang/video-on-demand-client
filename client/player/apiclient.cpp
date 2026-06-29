@@ -9,6 +9,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QProcessEnvironment>
 #include <QUrlQuery>
 
 namespace {
@@ -50,12 +51,56 @@ UserInfo userInfoFromJsonObject(const QJsonObject &obj)
     user.avatarPath = obj["avatarPath"].toString();
     return user;
 }
+
+QUrl endpointUrl(const QUrl &baseUrl, const QString &path)
+{
+    QUrl url = baseUrl;
+    url.setPath(path);
+    url.setQuery(QString());
+    return url;
+}
 }
 
 ApiClient::ApiClient(QObject *parent)
     : QObject(parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
+    // 这是什么：统一配置后端 API 根地址，默认连接真实后端，也允许用环境变量切回 mock。
+    // 为什么这样做：所有接口路径保持一致，联调时不用逐个修改几十个 QUrl。
+    // 什么时候调用：每个 ApiClient 创建时调用一次；如果要连 mock，启动前设置 VIDEO_API_BASE_URL。
+    // 和谁配合：后端 video-on-demand-server 默认监听 http://192.168.19.129:9000。
+    const QString baseUrlText = QProcessEnvironment::systemEnvironment()
+        .value("VIDEO_API_BASE_URL", "http://192.168.19.129:9000")
+        .trimmed();
+    const QUrl baseUrl(baseUrlText.endsWith('/') ? baseUrlText.left(baseUrlText.size() - 1) : baseUrlText);
+
+    m_videosUrl = endpointUrl(baseUrl, "/videos");
+    m_loginUrl = endpointUrl(baseUrl, "/login");
+    m_emailCodeUrl = endpointUrl(baseUrl, "/login/email-code");
+    m_emailLoginUrl = endpointUrl(baseUrl, "/login/email");
+    m_logoutUrl = endpointUrl(baseUrl, "/logout");
+    m_uploadVideoUrl = endpointUrl(baseUrl, "/videos");
+    m_uploadVideoFilesUrl = endpointUrl(baseUrl, "/videos/upload");
+    m_playUrlUrl = endpointUrl(baseUrl, "/videos/play-url");
+    m_barragesUrl = endpointUrl(baseUrl, "/videos/barrages");
+    m_videoDetailUrl = endpointUrl(baseUrl, "/videos/detail");
+    m_likeUrl = endpointUrl(baseUrl, "/videos/like");
+    m_unlikeUrl = endpointUrl(baseUrl, "/videos/unlike");
+    m_likeStatusUrl = endpointUrl(baseUrl, "/videos/like-status");
+    m_watchProgressUrl = endpointUrl(baseUrl, "/videos/watch-progress");
+    m_commentsUrl = endpointUrl(baseUrl, "/videos/comments");
+    m_searchUrl = endpointUrl(baseUrl, "/videos/search");
+    m_favoriteStatusUrl = endpointUrl(baseUrl, "/videos/favorite-status");
+    m_favoriteUrl = endpointUrl(baseUrl, "/videos/favorite");
+    m_unfavoriteUrl = endpointUrl(baseUrl, "/videos/unfavorite");
+    m_favoriteVideosUrl = endpointUrl(baseUrl, "/users/favorites");
+    m_userProfileUrl = endpointUrl(baseUrl, "/users/profile");
+    m_myVideosUrl = endpointUrl(baseUrl, "/users/videos");
+    m_avatarUploadUrl = endpointUrl(baseUrl, "/users/avatar");
+    m_adminReviewsUrl = endpointUrl(baseUrl, "/admin/reviews");
+    m_adminReviewActionUrl = endpointUrl(baseUrl, "/admin/reviews/action");
+    m_adminUsersUrl = endpointUrl(baseUrl, "/admin/users");
+    m_adminUserActionUrl = endpointUrl(baseUrl, "/admin/users/action");
 }
 
 void ApiClient::fetchVideos()
@@ -391,12 +436,17 @@ void ApiClient::fetchPlayUrl(const QString &videoId)
         const QByteArray data = reply->readAll();
         const QJsonObject obj = QJsonDocument::fromJson(data).object();
         const bool success = obj["success"].toBool(false);
-        const QString playUrl = obj["playUrl"].toString().trimmed();
+        QString playUrl = obj["playUrl"].toString().trimmed();
         if (!success || playUrl.isEmpty()) {
             const QString message = obj["message"].toString("播放地址为空");
             emit playUrlFailed(message);
             reply->deleteLater();
             return;
+        }
+
+        const QUrl parsedPlayUrl(playUrl);
+        if (parsedPlayUrl.isRelative()) {
+            playUrl = m_playUrlUrl.resolved(parsedPlayUrl).toString();
         }
 
         emit playUrlLoaded(playUrl);

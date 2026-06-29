@@ -469,113 +469,113 @@ private:
     void sendVideoFavoriteRequest(const QUrl &url, const QString &videoId);
 
     // 这是什么：当前首页视频列表接口地址。
-    // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换 baseUrl 或配置来源。
+    // 为什么这样做：默认指向真实后端，也可通过 VIDEO_API_BASE_URL 切换到 mock 或其他环境。
     // 什么时候使用：fetchVideos() 创建 QNetworkRequest 时使用。
     // 和谁配合：tools/mock_videos_server.py 当前提供同路径的 /videos 响应。
-    QUrl m_videosUrl = QUrl("http://127.0.0.1:8080/videos");
+    QUrl m_videosUrl = QUrl("http://192.168.19.129:9000/videos");
 
     // 这是什么：当前临时登录接口地址。
-    // 为什么这样做：先固定到 mock server，后续接真实后端时只需要替换这里或抽出 baseUrl。
+    // 为什么这样做：默认指向真实后端，也可通过 VIDEO_API_BASE_URL 切换到 mock 或其他环境。
     // 什么时候使用：login() 创建 POST /login 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 提供同路径的临时登录响应。
-    QUrl m_loginUrl = QUrl("http://127.0.0.1:8080/login");
-    QUrl m_emailCodeUrl = QUrl("http://127.0.0.1:8080/login/email-code");
-    QUrl m_emailLoginUrl = QUrl("http://127.0.0.1:8080/login/email");
+    QUrl m_loginUrl = QUrl("http://192.168.19.129:9000/login");
+    QUrl m_emailCodeUrl = QUrl("http://192.168.19.129:9000/login/email-code");
+    QUrl m_emailLoginUrl = QUrl("http://192.168.19.129:9000/login/email");
     // 这是什么：退出登录接口地址；为什么这样做：将会话结束表达为明确 POST 动作。
     // 什么时候使用：logout() 创建请求时；和谁配合：mock/真实后端会话管理。
-    QUrl m_logoutUrl = QUrl("http://127.0.0.1:8080/logout");
+    QUrl m_logoutUrl = QUrl("http://192.168.19.129:9000/logout");
 
     // 这是什么：当前上传视频元数据接口地址。
     // 为什么这样做：第一版沿用 REST 风格，GET /videos 获取列表，POST /videos 发布新视频元数据。
     // 什么时候使用：uploadVideo() 创建 POST /videos 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 处理同路径的上传请求。
-    QUrl m_uploadVideoUrl = QUrl("http://127.0.0.1:8080/videos");
+    QUrl m_uploadVideoUrl = QUrl("http://192.168.19.129:9000/videos");
 
     // 这是什么：真实视频文件上传接口地址。
     // 为什么这样做：multipart 请求与旧的纯 JSON 元数据请求分开，后端可明确解析二进制文件。
     // 什么时候使用：uploadVideo() 校验本地文件可读后使用。
     // 和谁配合：UploadVideoPage 提供路径，mock server 保存 videoFile/coverFile 部分。
-    QUrl m_uploadVideoFilesUrl = QUrl("http://127.0.0.1:8080/videos/upload");
+    QUrl m_uploadVideoFilesUrl = QUrl("http://192.168.19.129:9000/videos/upload");
 
     // 这是什么：当前最小版播放地址接口地址。
     // 为什么这样做：先不引入 videoId，固定接口能最快验证播放页从网络拿播放地址。
     // 什么时候使用：fetchPlayUrl() 创建 GET /videos/play-url 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 返回本地 test.mp4 路径。
-    QUrl m_playUrlUrl = QUrl("http://127.0.0.1:8080/videos/play-url");
+    QUrl m_playUrlUrl = QUrl("http://192.168.19.129:9000/videos/play-url");
 
     // 这是什么：当前弹幕接口地址。
     // 为什么这样做：第一版沿用固定路径，GET 拉取弹幕，POST 发送弹幕。
     // 什么时候使用：fetchBarrages() 和 sendBarrage() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 的 /videos/barrages 内存接口。
-    QUrl m_barragesUrl = QUrl("http://127.0.0.1:8080/videos/barrages");
+    QUrl m_barragesUrl = QUrl("http://192.168.19.129:9000/videos/barrages");
 
     // 这是什么：当前视频详情接口地址。
     // 为什么这样做：第一版用固定 /videos/detail 路径配合 id query，后续接真实后端时容易升级为按视频 id 查详情。
     // 什么时候使用：fetchVideoDetail() 创建 GET /videos/detail?id=... 请求时使用。
     // 和谁配合：tools/mock_videos_server.py 根据 id 返回 mock 视频详情。
-    QUrl m_videoDetailUrl = QUrl("http://127.0.0.1:8080/videos/detail");
+    QUrl m_videoDetailUrl = QUrl("http://192.168.19.129:9000/videos/detail");
 
     // 这是什么：当前点赞接口地址。
     // 为什么这样做：第一版用 POST /videos/like 表达“当前用户点赞当前视频”的动作。
     // 什么时候使用：likeVideo() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 在内存中记录用户点赞状态。
-    QUrl m_likeUrl = QUrl("http://127.0.0.1:8080/videos/like");
+    QUrl m_likeUrl = QUrl("http://192.168.19.129:9000/videos/like");
 
     // 这是什么：当前取消点赞接口地址。
     // 为什么这样做：第一版用 POST /videos/unlike 表达“当前用户取消点赞当前视频”的动作。
     // 什么时候使用：unlikeVideo() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 在内存中移除用户点赞状态。
-    QUrl m_unlikeUrl = QUrl("http://127.0.0.1:8080/videos/unlike");
+    QUrl m_unlikeUrl = QUrl("http://192.168.19.129:9000/videos/unlike");
 
     // 这是什么：当前用户对视频点赞状态的查询地址。
     // 为什么这样做：查询关系是读取操作，和点赞/取消点赞 POST 分开。
     // 什么时候使用：fetchVideoLikeStatus() 创建 GET 请求时使用。
     // 和谁配合：mock server 的 GET /videos/like-status。
-    QUrl m_likeStatusUrl = QUrl("http://127.0.0.1:8080/videos/like-status");
+    QUrl m_likeStatusUrl = QUrl("http://192.168.19.129:9000/videos/like-status");
 
     // 这是什么：当前播放记录接口地址。
     // 为什么这样做：第一版 GET/POST 共用 /videos/watch-progress，分别负责读取和保存进度。
     // 什么时候使用：fetchWatchProgress() 和 saveWatchProgress() 创建请求时使用。
     // 和谁配合：tools/mock_videos_server.py 用内存保存 account + videoId 对应的秒数。
-    QUrl m_watchProgressUrl = QUrl("http://127.0.0.1:8080/videos/watch-progress");
+    QUrl m_watchProgressUrl = QUrl("http://192.168.19.129:9000/videos/watch-progress");
 
     // 这是什么：当前评论列表和发表评论共用的接口地址。
     // 为什么这样做：GET 表示读取集合，POST 表示向集合新增评论，符合当前项目的 REST 风格。
     // 什么时候使用：fetchComments() 和 sendComment() 创建网络请求时使用。
     // 和谁配合：tools/mock_videos_server.py 提供同路径的内存评论接口。
-    QUrl m_commentsUrl = QUrl("http://127.0.0.1:8080/videos/comments");
+    QUrl m_commentsUrl = QUrl("http://192.168.19.129:9000/videos/comments");
 
     // 这是什么：当前视频搜索接口地址。
     // 为什么这样做：搜索是读取操作，使用 GET 并通过 keyword 查询参数表达条件。
     // 什么时候使用：searchVideos() 创建网络请求时使用。
     // 和谁配合：tools/mock_videos_server.py 的 GET /videos/search。
-    QUrl m_searchUrl = QUrl("http://127.0.0.1:8080/videos/search");
+    QUrl m_searchUrl = QUrl("http://192.168.19.129:9000/videos/search");
 
     // 这是什么：收藏状态、收藏操作和个人收藏列表的接口地址。
     // 为什么这样做：读状态、写关系、读列表职责不同，使用独立 REST 路径更清晰。
     // 什么时候使用：播放页初始化/点击收藏，以及“我的收藏”入口请求列表时使用。
     // 和谁配合：mock server 的 VIDEO_FAVORITES 关系集合。
-    QUrl m_favoriteStatusUrl = QUrl("http://127.0.0.1:8080/videos/favorite-status");
-    QUrl m_favoriteUrl = QUrl("http://127.0.0.1:8080/videos/favorite");
-    QUrl m_unfavoriteUrl = QUrl("http://127.0.0.1:8080/videos/unfavorite");
-    QUrl m_favoriteVideosUrl = QUrl("http://127.0.0.1:8080/users/favorites");
+    QUrl m_favoriteStatusUrl = QUrl("http://192.168.19.129:9000/videos/favorite-status");
+    QUrl m_favoriteUrl = QUrl("http://192.168.19.129:9000/videos/favorite");
+    QUrl m_unfavoriteUrl = QUrl("http://192.168.19.129:9000/videos/unfavorite");
+    QUrl m_favoriteVideosUrl = QUrl("http://192.168.19.129:9000/users/favorites");
 
     // 这是什么：个人资料读取和修改共用地址。
     // 为什么这样做：GET 负责读取，POST 负责更新同一个用户资源。
     // 什么时候使用：fetchUserProfile() 和 updateUserProfile() 发请求时使用。
     // 和谁配合：mock server 的 USERS 内存数据。
-    QUrl m_userProfileUrl = QUrl("http://127.0.0.1:8080/users/profile");
+    QUrl m_userProfileUrl = QUrl("http://192.168.19.129:9000/users/profile");
 
     // 这是什么：当前用户发布视频列表接口地址。
     // 为什么这样做：用户资源下的视频集合使用独立 GET 路径表达归属关系。
     // 什么时候使用：fetchMyVideos() 创建请求时使用。
     // 和谁配合：mock server 根据 ownerAccount 返回 VIDEOS 子集。
-    QUrl m_myVideosUrl = QUrl("http://127.0.0.1:8080/users/videos");
-    QUrl m_avatarUploadUrl = QUrl("http://127.0.0.1:8080/users/avatar");
-    QUrl m_adminReviewsUrl = QUrl("http://127.0.0.1:8080/admin/reviews");
-    QUrl m_adminReviewActionUrl = QUrl("http://127.0.0.1:8080/admin/reviews/action");
-    QUrl m_adminUsersUrl = QUrl("http://127.0.0.1:8080/admin/users");
-    QUrl m_adminUserActionUrl = QUrl("http://127.0.0.1:8080/admin/users/action");
+    QUrl m_myVideosUrl = QUrl("http://192.168.19.129:9000/users/videos");
+    QUrl m_avatarUploadUrl = QUrl("http://192.168.19.129:9000/users/avatar");
+    QUrl m_adminReviewsUrl = QUrl("http://192.168.19.129:9000/admin/reviews");
+    QUrl m_adminReviewActionUrl = QUrl("http://192.168.19.129:9000/admin/reviews/action");
+    QUrl m_adminUsersUrl = QUrl("http://192.168.19.129:9000/admin/users");
+    QUrl m_adminUserActionUrl = QUrl("http://192.168.19.129:9000/admin/users/action");
 
     // 这是什么：Qt 网络请求管理器。
     // 为什么能实现：它负责创建并发送 GET/POST 等请求，返回 QNetworkReply 表示异步响应。
