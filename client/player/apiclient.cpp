@@ -1,5 +1,7 @@
 #include "apiclient.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -85,19 +87,61 @@ QString serverResourceUrl(const QUrl &endpointUrl, const QString &path)
 
     return path;
 }
+
+QString readBaseUrlFromLocalConfig()
+{
+    // 这是什么：读取开发机本地 API 配置，不提交到 Git。
+    // 为什么这样做：展示前如果虚拟机 IP 变了，只改 api.local.json，不用重新编译客户端。
+    // 什么时候调用：ApiClient 构造时，在环境变量没有设置的情况下读取。
+    // 和谁配合：仓库里的 api.example.json 提供可复制模板。
+    const QStringList candidates = {
+        QCoreApplication::applicationDirPath() + "/api.local.json",
+        QDir::currentPath() + "/api.local.json",
+        QDir::currentPath() + "/client/player/api.local.json",
+    };
+
+    for (const QString &path : candidates) {
+        QFile file(path);
+        if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        const QString baseUrl =
+            document.object().value("baseUrl").toString().trimmed();
+        if (!baseUrl.isEmpty()) {
+            return baseUrl;
+        }
+    }
+    return {};
+}
+
+QString configuredBaseUrlText()
+{
+    const QString envBaseUrl = QProcessEnvironment::systemEnvironment()
+        .value("VIDEO_API_BASE_URL")
+        .trimmed();
+    if (!envBaseUrl.isEmpty()) {
+        return envBaseUrl;
+    }
+
+    const QString localBaseUrl = readBaseUrlFromLocalConfig();
+    if (!localBaseUrl.isEmpty()) {
+        return localBaseUrl;
+    }
+
+    return "http://192.168.19.129:9000";
+}
 }
 
 ApiClient::ApiClient(QObject *parent)
     : QObject(parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
-    // 这是什么：统一配置后端 API 根地址，默认连接真实后端，也允许用环境变量切回 mock。
-    // 为什么这样做：所有接口路径保持一致，联调时不用逐个修改几十个 QUrl。
+    // 这是什么：统一配置后端 API 根地址，按 环境变量 > api.local.json > 默认地址 选择。
+    // 为什么这样做：所有接口路径保持一致，展示前换 IP 时不用逐个修改几十个 QUrl。
     // 什么时候调用：每个 ApiClient 创建时调用一次；如果要连 mock，启动前设置 VIDEO_API_BASE_URL。
     // 和谁配合：后端 video-on-demand-server 默认监听 http://192.168.19.129:9000。
-    const QString baseUrlText = QProcessEnvironment::systemEnvironment()
-        .value("VIDEO_API_BASE_URL", "http://192.168.19.129:9000")
-        .trimmed();
+    const QString baseUrlText = configuredBaseUrlText();
     const QUrl baseUrl(baseUrlText.endsWith('/') ? baseUrlText.left(baseUrlText.size() - 1) : baseUrlText);
 
     m_videosUrl = endpointUrl(baseUrl, "/videos");

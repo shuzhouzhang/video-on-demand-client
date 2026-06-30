@@ -326,11 +326,11 @@ void PlayerPage::initUI(const QString &videoId,
         m_apiClient->fetchBarrages(m_videoId);
     });
     connect(m_apiClient, &ApiClient::playUrlFailed, this, [this](const QString &message) {
-        // 这是什么：播放地址接口失败后的本地回退。
-        // 为什么能实现：当前阶段仍保留 test.mp4，本地路径可保证 mock server 关闭时播放页不至于空白。
+        // 这是什么：真实播放地址接口失败后的本地回退。
+        // 为什么能实现：当前阶段仍保留 test.mp4，但回退成功不代表真实后端播放链路成功。
         // 什么时候调用：网络错误、接口返回失败或 playUrl 为空时触发。
         // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
-        LOG() << "播放地址接口请求失败，回退本地测试视频:" << message;
+        LOG() << "真实后端播放地址失败，已回退本地测试视频；这不代表真实后端播放成功:" << message;
         startPlayback("D:/video-on-demand-client/test.mp4");
         m_apiClient->fetchBarrages(m_videoId);
     });

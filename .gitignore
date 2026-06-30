@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+api.local.json
+client/player/api.local.json
