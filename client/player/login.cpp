@@ -394,7 +394,7 @@ void Login::onLoginFailed(const QString &message)
     m_isLoginRequesting = false;
     ui->loginBtn->setEnabled(true);
     ui->loginBtn->setText(m_mode == Mode::Email ? "登录/注册" : "登录");
-    QMessageBox::warning(this, m_mode == Mode::Email ? "邮箱登录" : "密码登录", message);
+    if (!message.isEmpty()) QMessageBox::warning(this, m_mode == Mode::Email ? "邮箱登录" : "密码登录", message);
     if (m_mode == Mode::Email) {
         m_authcodeEdit->setFocus();
     } else {

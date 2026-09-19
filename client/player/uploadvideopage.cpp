@@ -464,7 +464,7 @@ void UploadVideoPage::onUploadFailed(const QString &message)
     // 什么时候调用：ApiClient::uploadFailed 信号触发时由 Qt 自动调用。
     // 和谁配合：上传按钮恢复可点，QMessageBox 把失败原因展示给用户。
     setCommitButtonRequesting(false);
-    QMessageBox::warning(this, "上传视频", message.isEmpty() ? "发布失败" : message);
+    if (!message.isEmpty()) QMessageBox::warning(this, "上传视频", message);
 }
 
 int UploadVideoPage::selectedTagCount() const

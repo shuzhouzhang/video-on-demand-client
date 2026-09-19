@@ -124,7 +124,7 @@ void AdminWidget::initUI()
         }
     });
     connect(m_apiClient, &ApiClient::adminRequestFailed, this, [this](const QString &message) {
-        QMessageBox::warning(this, QStringLiteral("后台操作"), message);
+        if (!message.isEmpty()) QMessageBox::warning(this, QStringLiteral("后台操作"), message);
         LOG() << "后台接口失败:" << message;
     });
     m_apiClient->fetchAdminReviews();

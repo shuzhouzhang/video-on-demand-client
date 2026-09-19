@@ -1,5 +1,6 @@
 #include "datacenter.h"
 
+#include <QRegularExpression>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -119,10 +120,8 @@ void DataCenter::setHomeVideos(const QList<VideoInfo> &videos)
 
 void DataCenter::setCurrentUser(const QString &userName, const QString &account)
 {
-    // 这是什么：把当前登录用户写进 DataCenter。
-    // 为什么能实现：登录成功时传入的 userName/account 已经由接口或本地邮箱流程确认可用。
-    // 什么时候调用：player::updateLoginState() 收到 Login::loginSuccess 后调用。
-    // 和谁配合：currentUser() 和 isLoggedIn() 后续都基于这份状态返回结果。
+    // 资料更新不能替代登录；更换账号时旧 Token 必须一并清理。
+    if (m_currentUser.account != account.trimmed()) clearCurrentUser();
     m_currentUser.userName = userName.trimmed();
     m_currentUser.account = account.trimmed();
     m_currentUser.description.clear();
@@ -135,6 +134,7 @@ void DataCenter::setCurrentUser(const UserInfo &user)
     // 为什么能实现：资料字段在写入前统一去掉首尾空格，DataCenter 继续作为页面共享状态源。
     // 什么时候调用：fetchUserProfile() 或 updateUserProfile() 成功后由 player.cpp 调用。
     // 和谁配合：currentUser() 把最新昵称、账号和简介提供给界面及其它接口。
+    if (!isLoggedIn() || user.account.trimmed() != m_currentUser.account) return;
     m_currentUser.userName = user.userName.trimmed();
     m_currentUser.account = user.account.trimmed();
     m_currentUser.description = user.description.trimmed();
@@ -153,19 +153,21 @@ UserInfo DataCenter::currentUser() const
 bool DataCenter::isLoggedIn() const
 {
     // 这是什么：返回当前是否处于登录状态。
-    // 为什么能实现：临时登录阶段没有 token，账号非空就是最小可用的登录标记。
+    // 为什么能实现：账号和 Token 同时存在才允许登录态操作，过期由服务器 401 确认。
     // 什么时候调用：用户点击需要登录的入口前调用。
     // 和谁配合：player.cpp 用它决定是否弹出 Login 窗口。
-    return !m_currentUser.account.isEmpty();
+    return !m_currentUser.account.isEmpty() && !m_token.isEmpty();
 }
 
 void DataCenter::clearCurrentUser()
 {
-    // 这是什么：删除当前进程中的登录用户信息。
-    // 为什么能实现：用默认构造 UserInfo 覆盖昵称、账号、简介和头像路径。
-    // 什么时候调用：ApiClient::logoutSucceeded 后调用。
-    // 和谁配合：player 主窗口随后恢复游客 UI。
+    // 本机退出立即清空账号和凭证，并推进版本，使在途旧响应失效。
+    const bool hadSession = isLoggedIn();
     m_currentUser = UserInfo{};
+    m_token.clear();
+    m_sessionOrigin = QUrl();
+    ++m_sessionRevision;
+    if (hadSession) emit sessionCleared(false);
 }
 
 void DataCenter::addBarrage(const QString &videoKey, int seconds, const QString &text)
@@ -205,4 +207,38 @@ void DataCenter::clearBarrages(const QString &videoKey)
     if (!videoKey.isEmpty()) {
         m_barragesByVideo.remove(videoKey);
     }
+}
+
+
+bool DataCenter::saveSession(const QString &name, const QString &account,
+                             const QString &token, const QUrl &origin)
+{
+    // 拒绝缺失或含换行的凭证，不能把“有账号”误当成登录成功。
+    static const QRegularExpression bearer(QStringLiteral("^[A-Za-z0-9._~+/-]+=*$"));
+    if (name.trimmed().isEmpty() || account.trimmed().isEmpty()
+        || token.isEmpty() || bearer.match(token).capturedLength() != token.size()) return false;
+    m_currentUser = UserInfo{name.trimmed(), account.trimmed(), {}, {}};
+    m_token = token;
+    m_sessionOrigin = origin;
+    ++m_sessionRevision;
+    return true;
+}
+
+QString DataCenter::tokenFor(const QUrl &url) const
+{
+    const auto port = [](const QUrl &u) { return u.port(u.scheme() == "https" ? 443 : 80); };
+    if (url.scheme() != m_sessionOrigin.scheme() || url.host() != m_sessionOrigin.host()
+        || port(url) != port(m_sessionOrigin)) return {};
+    return m_token;
+}
+
+void DataCenter::expireSession(quint64 revision)
+{
+    // 并发 401 只通知一次；旧请求不能清除后来建立的新会话。
+    if (revision != m_sessionRevision || !isLoggedIn()) return;
+    m_currentUser = UserInfo{};
+    m_token.clear();
+    m_sessionOrigin = QUrl();
+    ++m_sessionRevision;
+    emit sessionCleared(true);
 }

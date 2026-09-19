@@ -81,3 +81,15 @@ qt_generate_deploy_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
+
+
+# 回归测试直接编译业务类，通过本地 HTTP 服务检查真实 Qt 请求。
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(token_auth_test
+        tests/token_auth_test.cpp apiclient.cpp apiclient.h datacenter.cpp datacenter.h)
+    target_include_directories(token_auth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(token_auth_test PRIVATE Qt::Core Qt::Network Qt::Test)
+    add_test(NAME token_auth COMMAND token_auth_test)
+endif()

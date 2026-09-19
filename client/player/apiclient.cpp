@@ -179,7 +179,7 @@ void ApiClient::fetchVideos()
     // 为什么能实现：QNetworkRequest 保存 URL 和请求头，QNetworkAccessManager 根据它发出 HTTP 请求。
     // 什么时候调用：每次首页需要从后端重新拉取视频列表时执行。
     // 和谁配合：m_videosUrl 指向 mock server 或真实后端的视频列表接口。
-    QNetworkRequest request(m_videosUrl);
+    QNetworkRequest request = apiRequest(m_videosUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     // 这是什么：真正发起 GET 请求，并拿到代表本次响应的 reply。
@@ -192,8 +192,8 @@ void ApiClient::fetchVideos()
         // 为什么能实现：finished 在后端响应、网络失败或请求取消时触发，此时 reply 里已经有状态和响应体。
         // 什么时候调用：Qt 事件循环收到本次 HTTP 请求完成信号时自动调用。
         // 和谁配合：成功时交给 parseVideosFromJson，失败时通过 requestFailed 通知 player.cpp。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit requestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit requestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -225,7 +225,7 @@ void ApiClient::login(const QString &account, const QString &password)
     // 为什么能实现：登录接口需要把账号密码作为 JSON 请求体发给后端，QNetworkRequest 保存 URL 和 Content-Type。
     // 什么时候调用：Login 的密码登录表单通过本地基础校验后调用。
     // 和谁配合：m_loginUrl 指向 mock server 或真实后端的登录接口。
-    QNetworkRequest request(m_loginUrl);
+    QNetworkRequest request = apiRequest(m_loginUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QJsonObject payload;
@@ -243,8 +243,8 @@ void ApiClient::login(const QString &account, const QString &password)
         // 为什么能实现：finished 触发时 reply 已经包含网络状态和响应体，可以统一做错误处理和 JSON 解析。
         // 什么时候调用：Qt 事件循环收到 POST /login 完成信号时自动调用。
         // 和谁配合：成功发 loginSucceeded 给 Login，失败发 loginFailed 让 Login 提示用户。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit loginFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit loginFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -261,8 +261,9 @@ void ApiClient::login(const QString &account, const QString &password)
 
         const QString userName = obj["userName"].toString();
         const QString loginAccount = obj["account"].toString();
-        if (userName.isEmpty() || loginAccount.isEmpty()) {
-            emit loginFailed("登录响应缺少用户信息");
+        if (!DataCenter::instance().saveSession(userName, loginAccount,
+                obj["token"].toString(), m_loginUrl)) {
+            emit loginFailed("登录响应缺少有效的用户信息或 Token");
             reply->deleteLater();
             return;
         }
@@ -278,7 +279,7 @@ void ApiClient::requestEmailCode(const QString &email)
     // 为什么能实现：JSON POST 把邮箱交给后端，后端生成会话 id 和验证码。
     // 什么时候调用：Login 完成邮箱格式校验后调用。
     // 和谁配合：emailCodeSent/emailCodeFailed 把异步结果交回登录窗口。
-    QNetworkRequest request(m_emailCodeUrl);
+    QNetworkRequest request = apiRequest(m_emailCodeUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["email"] = email.trimmed();
@@ -286,8 +287,8 @@ void ApiClient::requestEmailCode(const QString &email)
         request,
         QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit emailCodeFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit emailCodeFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -310,7 +311,7 @@ void ApiClient::emailLogin(const QString &email,
     // 为什么能实现：后端用 authcodeId 找到验证码会话，再核对邮箱和六位验证码。
     // 什么时候调用：用户填写邮箱验证码并点击登录时调用。
     // 和谁配合：成功复用 loginSucceeded，失败复用 loginFailed。
-    QNetworkRequest request(m_emailLoginUrl);
+    QNetworkRequest request = apiRequest(m_emailLoginUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["email"] = email.trimmed();
@@ -320,16 +321,17 @@ void ApiClient::emailLogin(const QString &email,
         request,
         QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit loginFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit loginFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
         const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
         const QString userName = obj["userName"].toString();
         const QString account = obj["account"].toString();
-        if (!obj["success"].toBool(false) || userName.isEmpty() || account.isEmpty()) {
-            emit loginFailed(obj["message"].toString("邮箱验证码登录失败"));
+        if (!obj["success"].toBool(false) || !DataCenter::instance().saveSession(
+                userName, account, obj["token"].toString(), m_emailLoginUrl)) {
+            emit loginFailed(QStringLiteral("邮箱验证码登录失败，或响应缺少有效 Token"));
         } else {
             emit loginSucceeded(userName, account);
         }
@@ -339,28 +341,21 @@ void ApiClient::emailLogin(const QString &email,
 
 void ApiClient::logout()
 {
-    // 这是什么：提交当前账号退出登录请求。
-    // 为什么能实现：DataCenter 提供账号，后端确认会话退出后通过信号通知页面。
-    // 什么时候调用：设置入口确认退出后调用。
-    // 和谁配合：player.cpp 只在 logoutSucceeded 后清空本地状态。
     const UserInfo user = DataCenter::instance().currentUser();
-    if (user.account.isEmpty()) {
-        emit logoutFailed("当前没有登录用户");
-        return;
-    }
-    QNetworkRequest request(m_logoutUrl);
+    QNetworkRequest request = apiRequest(m_logoutUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["account"] = user.account;
+    // 先把旧凭证交给退出请求，再立即清理本机；断网也不能留下登录态。
     QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    DataCenter::instance().clearCurrentUser();
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
-        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
-            emit logoutFailed(reply->error() == QNetworkReply::NoError
-                                  ? obj["message"].toString("退出登录失败")
-                                  : reply->errorString());
-        } else {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto obj = QJsonDocument::fromJson(reply->readAll()).object();
+        if (status == 401 || (reply->error() == QNetworkReply::NoError && obj["success"].toBool())) {
             emit logoutSucceeded();
+        } else {
+            emit logoutFailed(QStringLiteral("本机已退出，但服务端会话注销未确认；未自动重试"));
         }
         reply->deleteLater();
     });
@@ -379,7 +374,7 @@ void ApiClient::uploadVideo(const UploadVideoInfo &info)
         return;
     }
 
-    QNetworkRequest request(m_uploadVideoFilesUrl);
+    QNetworkRequest request = apiRequest(m_uploadVideoFilesUrl);
     auto *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
     QJsonArray tagArray;
@@ -448,8 +443,8 @@ void ApiClient::uploadVideo(const UploadVideoInfo &info)
         // 为什么能实现：finished 时 multipart 已发送完毕，响应 JSON 会说明文件和元数据是否保存成功。
         // 什么时候调用：Qt 事件循环收到 POST /videos/upload 完成信号时自动调用。
         // 和谁配合：成功发 uploadSucceeded，失败发 uploadFailed；reply 销毁时同时清理文件对象。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit uploadFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit uploadFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -484,7 +479,7 @@ void ApiClient::fetchPlayUrl(const QString &videoId)
     QUrlQuery query;
     query.addQueryItem("videoId", trimmedVideoId);
     url.setQuery(query);
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     // 这是什么：真正发起播放地址请求。
@@ -497,8 +492,8 @@ void ApiClient::fetchPlayUrl(const QString &videoId)
         // 为什么能实现：finished 触发时 reply 中已有网络状态和响应体，可以统一解析 success/playUrl。
         // 什么时候调用：Qt 事件循环收到 GET /videos/play-url 完成信号时自动调用。
         // 和谁配合：成功交给 PlayerPage 播放，失败让 PlayerPage 回退本地 test.mp4。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit playUrlFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit playUrlFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -539,7 +534,7 @@ void ApiClient::fetchBarrages(const QString &videoId)
     QUrlQuery query;
     query.addQueryItem("videoId", trimmedVideoId);
     url.setQuery(query);
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = m_networkManager->get(request);
@@ -548,8 +543,8 @@ void ApiClient::fetchBarrages(const QString &videoId)
         // 为什么能实现：finished 时 response body 已完整可读，可以把 JSON 数组整理成按秒分组的哈希表。
         // 什么时候调用：Qt 事件循环收到 GET /videos/barrages 完成信号时自动调用。
         // 和谁配合：PlayerPage 收到 barragesLoaded 后写入 DataCenter。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit barrageRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit barrageRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -588,7 +583,7 @@ void ApiClient::sendBarrage(const QString &videoId, int seconds, const QString &
         emit barrageRequestFailed("视频 id 不能为空");
         return;
     }
-    QNetworkRequest request(m_barragesUrl);
+    QNetworkRequest request = apiRequest(m_barragesUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     const UserInfo currentUser = DataCenter::instance().currentUser();
@@ -606,8 +601,8 @@ void ApiClient::sendBarrage(const QString &videoId, int seconds, const QString &
         // 为什么能实现：mock/后端返回 success、seconds、text，成功后页面可以用这些值立即展示弹幕。
         // 什么时候调用：Qt 事件循环收到 POST /videos/barrages 完成信号时自动调用。
         // 和谁配合：PlayerPage 收到 barrageSendSucceeded 后显示弹幕并写入本地缓存。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit barrageRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit barrageRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -650,7 +645,7 @@ void ApiClient::fetchVideoDetail(const QString &videoId)
     query.addQueryItem("id", trimmedVideoId);
     url.setQuery(query);
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = m_networkManager->get(request);
@@ -659,8 +654,8 @@ void ApiClient::fetchVideoDetail(const QString &videoId)
         // 为什么能实现：finished 触发时 reply 已包含网络状态和响应体，可以统一判断错误、解析 success/video 字段。
         // 什么时候调用：Qt 事件循环收到 GET /videos/detail 完成信号时自动调用。
         // 和谁配合：成功发 videoDetailLoaded 给 PlayerPage，失败发 videoDetailFailed 让播放页保留兜底信息。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit videoDetailFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit videoDetailFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -720,14 +715,14 @@ void ApiClient::fetchVideoLikeStatus(const QString &videoId)
     query.addQueryItem("videoId", trimmedVideoId);
     query.addQueryItem("account", user.account.isEmpty() ? QStringLiteral("guest") : user.account);
     url.setQuery(query);
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         // 这是什么：处理点赞状态查询响应。
         // 为什么能实现：响应中的 liked/likeCount 就是页面初始化所需的完整状态。
         // 什么时候调用：GET /videos/like-status 完成后由 Qt 自动调用。
         // 和谁配合：PlayerPage 收到信号后更新 m_isLiked、按钮和数量。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit videoLikeFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit videoLikeFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -754,7 +749,7 @@ void ApiClient::sendVideoLikeRequest(const QUrl &url, const QString &videoId)
         return;
     }
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     const UserInfo currentUser = DataCenter::instance().currentUser();
@@ -769,8 +764,8 @@ void ApiClient::sendVideoLikeRequest(const QUrl &url, const QString &videoId)
         // 为什么能实现：finished 触发时 reply 已有完整响应体，可以统一解析 success、liked 和 likeCount。
         // 什么时候调用：Qt 事件循环收到 POST /videos/like 或 /videos/unlike 完成信号时自动调用。
         // 和谁配合：成功发 videoLikeChanged 给 PlayerPage，失败发 videoLikeFailed 保持页面原状态。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit videoLikeFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit videoLikeFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -815,7 +810,7 @@ void ApiClient::fetchWatchProgress(const QString &videoId)
     query.addQueryItem("account", currentUser.account);
     url.setQuery(query);
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = m_networkManager->get(request);
@@ -824,8 +819,8 @@ void ApiClient::fetchWatchProgress(const QString &videoId)
         // 为什么能实现：finished 触发时 reply 已包含完整响应体，可以统一解析 success 和 seconds。
         // 什么时候调用：Qt 事件循环收到 GET /videos/watch-progress 完成信号时自动调用。
         // 和谁配合：成功发 watchProgressLoaded 给 PlayerPage，失败发 watchProgressFailed 但不影响播放。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit watchProgressFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit watchProgressFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -859,7 +854,7 @@ void ApiClient::saveWatchProgress(const QString &videoId, int seconds)
         return;
     }
 
-    QNetworkRequest request(m_watchProgressUrl);
+    QNetworkRequest request = apiRequest(m_watchProgressUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     const UserInfo currentUser = DataCenter::instance().currentUser();
@@ -875,8 +870,8 @@ void ApiClient::saveWatchProgress(const QString &videoId, int seconds)
         // 为什么能实现：mock/后端返回 success/message，成功说明当前秒数已经写入内存记录。
         // 什么时候调用：Qt 事件循环收到 POST /videos/watch-progress 完成信号时自动调用。
         // 和谁配合：PlayerPage 只记录保存结果，播放控制不等待这个接口。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit watchProgressFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit watchProgressFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -911,7 +906,7 @@ void ApiClient::fetchComments(const QString &videoId)
     query.addQueryItem("videoId", trimmedVideoId);
     url.setQuery(query);
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = m_networkManager->get(request);
@@ -920,8 +915,8 @@ void ApiClient::fetchComments(const QString &videoId)
         // 为什么能实现：finished 时响应体已完整，每个 JSON 对象都能按固定字段转成 CommentInfo。
         // 什么时候调用：Qt 事件循环收到 GET /videos/comments 完成信号时自动调用。
         // 和谁配合：成功发 commentsLoaded，CommentDialog 按最新优先顺序渲染。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit commentRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit commentRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -977,7 +972,7 @@ void ApiClient::sendComment(const QString &videoId, const QString &content)
         return;
     }
 
-    QNetworkRequest request(m_commentsUrl);
+    QNetworkRequest request = apiRequest(m_commentsUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["videoId"] = trimmedVideoId;
@@ -993,8 +988,8 @@ void ApiClient::sendComment(const QString &videoId, const QString &content)
         // 为什么能实现：后端成功响应包含完整 comment 对象，可直接转成页面需要的 CommentInfo。
         // 什么时候调用：Qt 事件循环收到 POST /videos/comments 完成信号时自动调用。
         // 和谁配合：成功发 commentSent，失败发 commentRequestFailed 并让窗口恢复发送按钮。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit commentRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit commentRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1040,7 +1035,7 @@ void ApiClient::searchVideos(const QString &keyword)
     query.addQueryItem("keyword", trimmedKeyword);
     url.setQuery(query);
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QNetworkReply *reply = m_networkManager->get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -1048,8 +1043,8 @@ void ApiClient::searchVideos(const QString &keyword)
         // 为什么能实现：搜索接口沿用 /videos 相同字段，可复用 videoInfoFromJsonObject() 的解析规则。
         // 什么时候调用：Qt 收到 GET /videos/search 完成信号时自动调用。
         // 和谁配合：成功发 searchResultsLoaded，页面用原有 VideoBox 展示；失败发 searchFailed。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit searchFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit searchFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1094,10 +1089,10 @@ void ApiClient::fetchFavoriteStatus(const QString &videoId)
     query.addQueryItem("videoId", trimmedVideoId);
     query.addQueryItem("account", user.account);
     url.setQuery(query);
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit favoriteRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit favoriteRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1146,7 +1141,7 @@ void ApiClient::sendVideoFavoriteRequest(const QUrl &url, const QString &videoId
         return;
     }
 
-    QNetworkRequest request(url);
+    QNetworkRequest request = apiRequest(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["videoId"] = trimmedVideoId;
@@ -1155,8 +1150,8 @@ void ApiClient::sendVideoFavoriteRequest(const QUrl &url, const QString &videoId
         request,
         QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit favoriteRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit favoriteRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1186,10 +1181,10 @@ void ApiClient::fetchFavoriteVideos()
     QUrlQuery query;
     query.addQueryItem("account", user.account);
     url.setQuery(query);
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit favoriteRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit favoriteRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1229,10 +1224,10 @@ void ApiClient::fetchUserProfile()
     QUrlQuery query;
     query.addQueryItem("account", currentUser.account);
     url.setQuery(query);
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit userProfileFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit userProfileFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1274,7 +1269,7 @@ void ApiClient::updateUserProfile(const QString &userName, const QString &descri
         return;
     }
 
-    QNetworkRequest request(m_userProfileUrl);
+    QNetworkRequest request = apiRequest(m_userProfileUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["account"] = currentUser.account;
@@ -1284,8 +1279,8 @@ void ApiClient::updateUserProfile(const QString &userName, const QString &descri
         request,
         QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit userProfileFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit userProfileFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1321,14 +1316,14 @@ void ApiClient::fetchMyVideos()
     QUrlQuery query;
     query.addQueryItem("account", user.account);
     url.setQuery(query);
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(url));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(url));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         // 这是什么：处理我的视频接口响应。
         // 为什么能实现：每一项字段与 VideoInfo 一致，可复用统一 JSON 转换函数。
         // 什么时候调用：GET /users/videos 完成后由 Qt 自动调用。
         // 和谁配合：成功发 myVideosLoaded，失败发 myVideosFailed。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit myVideosFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit myVideosFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1383,15 +1378,15 @@ void ApiClient::uploadAvatar(const QString &filePath)
     avatarFile->setParent(multiPart);
     multiPart->append(avatarPart);
 
-    QNetworkReply *reply = m_networkManager->post(QNetworkRequest(m_avatarUploadUrl), multiPart);
+    QNetworkReply *reply = m_networkManager->post(apiRequest(m_avatarUploadUrl), multiPart);
     multiPart->setParent(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         // 这是什么：处理头像上传响应。
         // 为什么能实现：后端 success=true 时同时返回可供客户端读取的 avatarPath。
         // 什么时候调用：POST /users/avatar 完成后由 Qt 自动调用。
         // 和谁配合：player.cpp 使用 avatarUploaded 更新共享状态和 UI。
-        if (reply->error() != QNetworkReply::NoError) {
-            emit avatarUploadFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit avatarUploadFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1413,10 +1408,10 @@ void ApiClient::fetchAdminReviews()
     // 为什么能实现：GET 返回审核行数组，客户端逐项转成 AdminReviewInfo。
     // 什么时候调用：AdminWidget 初始化或审核操作成功后调用。
     // 和谁配合：adminReviewsLoaded 让审核表格刷新数据源。
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(m_adminReviewsUrl));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(m_adminReviewsUrl));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit adminRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit adminRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1450,7 +1445,7 @@ void ApiClient::reviewVideo(const QString &videoId, const QString &status)
     // 为什么能实现：videoId 定位审核记录，status 表达最终审核状态。
     // 什么时候调用：管理员点击审核表格“通过”或“拒绝”时调用。
     // 和谁配合：adminActionSucceeded 触发 AdminWidget 重新读取审核列表。
-    QNetworkRequest request(m_adminReviewActionUrl);
+    QNetworkRequest request = apiRequest(m_adminReviewActionUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["videoId"] = videoId;
@@ -1458,10 +1453,11 @@ void ApiClient::reviewVideo(const QString &videoId, const QString &status)
     QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
-        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
-            emit adminRequestFailed(reply->error() == QNetworkReply::NoError
+        const bool failed = replyFailed(reply);
+        if (failed || !obj["success"].toBool(false)) {
+            emit adminRequestFailed(!failed
                                         ? obj["message"].toString("审核操作失败")
-                                        : reply->errorString());
+                                        : replyError(reply));
         } else {
             emit adminActionSucceeded("reviews");
         }
@@ -1475,10 +1471,10 @@ void ApiClient::fetchAdminUsers()
     // 为什么能实现：GET 返回用户角色数组，客户端转成 AdminUserInfo。
     // 什么时候调用：AdminWidget 初始化或角色操作成功后调用。
     // 和谁配合：adminUsersLoaded 刷新角色管理表格。
-    QNetworkReply *reply = m_networkManager->get(QNetworkRequest(m_adminUsersUrl));
+    QNetworkReply *reply = m_networkManager->get(apiRequest(m_adminUsersUrl));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit adminRequestFailed(reply->errorString());
+        if (replyFailed(reply)) {
+            emit adminRequestFailed(replyError(reply));
             reply->deleteLater();
             return;
         }
@@ -1512,7 +1508,7 @@ void ApiClient::updateAdminUser(const QString &account, const QString &action)
     // 为什么能实现：account 定位用户，action 由后端映射到明确状态变化。
     // 什么时候调用：角色管理操作按钮或“添加管理员”确认后调用。
     // 和谁配合：adminActionSucceeded 触发 AdminWidget 重新读取用户列表。
-    QNetworkRequest request(m_adminUserActionUrl);
+    QNetworkRequest request = apiRequest(m_adminUserActionUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     QJsonObject payload;
     payload["account"] = account.trimmed();
@@ -1520,13 +1516,63 @@ void ApiClient::updateAdminUser(const QString &account, const QString &action)
     QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
-        if (reply->error() != QNetworkReply::NoError || !obj["success"].toBool(false)) {
-            emit adminRequestFailed(reply->error() == QNetworkReply::NoError
+        const bool failed = replyFailed(reply);
+        if (failed || !obj["success"].toBool(false)) {
+            emit adminRequestFailed(!failed
                                         ? obj["message"].toString("角色操作失败")
-                                        : reply->errorString());
+                                        : replyError(reply));
         } else {
             emit adminActionSucceeded("users");
         }
         reply->deleteLater();
     });
+}
+
+
+QNetworkRequest ApiClient::apiRequest(const QUrl &url) const
+{
+    QNetworkRequest request(url);
+    // API 请求统一注入；媒体下载使用独立管理器。禁止自动重定向转发凭证或重放写入。
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(30000);
+    auto &session = DataCenter::instance();
+    const bool login = url.path() == "/login" || url.path() == "/login/email";
+    const bool publicLogin = login || url.path() == "/login/email-code";
+    const QString token = publicLogin ? QString() : session.tokenFor(url);
+    if (!token.isEmpty()) request.setRawHeader("Authorization", "Bearer " + token.toUtf8());
+    request.setAttribute(QNetworkRequest::User, QVariant::fromValue(session.sessionRevision()));
+    request.setAttribute(static_cast<QNetworkRequest::Attribute>(QNetworkRequest::User + 1),
+                         login || !token.isEmpty());
+    return request;
+}
+
+bool ApiClient::replyFailed(QNetworkReply *reply)
+{
+    const auto request = reply->request();
+    const auto revision = request.attribute(QNetworkRequest::User).toULongLong();
+    const bool bound = request.attribute(static_cast<QNetworkRequest::Attribute>(QNetworkRequest::User + 1)).toBool();
+    if (bound && revision != DataCenter::instance().sessionRevision()) {
+        reply->setProperty("silentAuthFailure", true);
+        return true;
+    }
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401 && request.url().path() != "/login" && request.url().path() != "/login/email"
+        && request.url().path() != "/login/email-code") {
+        reply->setProperty("silentAuthFailure", true);
+        if (request.hasRawHeader("Authorization")) DataCenter::instance().expireSession(revision);
+        return true;
+    }
+    return reply->error() != QNetworkReply::NoError || status >= 300;
+}
+
+QString ApiClient::replyError(QNetworkReply *reply) const
+{
+    // 401 由主窗口显示一次；仍发失败信号让上传/编辑按钮结束等待。
+    if (reply->property("silentAuthFailure").toBool()) return {};
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401) return QStringLiteral("登录凭证被拒绝，请检查账号或验证码");
+    if (status == 403) return QStringLiteral("权限不足（403），当前登录会话保留");
+    if (status >= 500) return QStringLiteral("服务暂时不可用（%1），当前登录会话保留").arg(status);
+    if (status >= 300 && status < 400) return QStringLiteral("接口重定向已停止，请检查后端地址");
+    return QStringLiteral("网络请求失败，请检查连接（HTTP %1）").arg(status);
 }

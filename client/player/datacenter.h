@@ -1,6 +1,8 @@
 #ifndef DATACENTER_H
 #define DATACENTER_H
 
+#include <QObject>
+#include <QUrl>
 #include <QByteArray>
 #include <QHash>
 #include <QList>
@@ -74,8 +76,9 @@ struct AdminUserInfo {
 // 和谁配合：ApiClient 负责拿到响应数据，DataCenter/player 负责保存和展示解析后的视频列表。
 QList<VideoInfo> parseVideosFromJson(const QByteArray &data);
 
-class DataCenter
+class DataCenter : public QObject
 {
+    Q_OBJECT
 public:
     static DataCenter &instance();
 
@@ -95,10 +98,8 @@ public:
     // 和谁配合：homeVideos() 负责把保存后的数据再交给首页读取和展示。
     void setHomeVideos(const QList<VideoInfo> &videos);
 
-    // 这是什么：保存当前登录用户信息。
-    // 为什么能实现：登录成功后已经拿到 userName/account，DataCenter 只负责内存保存这份当前状态。
-    // 什么时候调用：Login::loginSuccess 触发后，player::updateLoginState() 接收到用户信息时调用。
-    // 和谁配合：currentUser() 和 isLoggedIn() 让页面后续都从同一个地方读取登录状态。
+    // 仅更新展示资料，不创建凭证；登录必须走 saveSession()。
+    // 账号发生变化时清掉旧会话，避免账号与 Token 错配。
     void setCurrentUser(const QString &userName, const QString &account);
 
     // 这是什么：用接口返回的完整资料替换当前用户信息。
@@ -114,14 +115,26 @@ public:
     UserInfo currentUser() const;
 
     // 这是什么：判断当前是否已经登录。
-    // 为什么能实现：临时登录阶段只要 currentUser 的账号不为空，就认为已有有效登录状态。
+    // 为什么能实现：同时持有账号和格式有效的 Token 才认为已登录；服务端仍会校验过期时间。
     // 什么时候调用：点击头像、资料、作品、关注、设置等需要登录的入口前调用。
     // 和谁配合：player.cpp 用它决定是打开登录窗口还是继续执行当前操作。
     bool isLoggedIn() const;
 
+    // 会话只保存在单例内存中；所有 ApiClient 共用，且凭证绑定后端来源。
+    bool saveSession(const QString &name, const QString &account,
+                     const QString &token, const QUrl &origin);
+    QString tokenFor(const QUrl &url) const;
+    quint64 sessionRevision() const { return m_sessionRevision; }
+    void expireSession(quint64 revision);
+
+signals:
+    void sessionCleared(bool expired);
+
+public:
+
     // 这是什么：清空当前登录用户内存状态。
     // 为什么能实现：UserInfo 重置为空后，isLoggedIn() 会立即返回 false。
-    // 什么时候调用：退出登录接口成功后调用。
+    // 什么时候调用：主动退出时立即调用，网络注销失败也不保留本地凭证。
     // 和谁配合：player.cpp 恢复游客页面，各业务接口停止携带旧账号。
     void clearCurrentUser();
 
@@ -137,6 +150,9 @@ private:
     QHash<QString, QStringList> m_categoryTags;
     QList<VideoInfo> m_homeVideos;
     UserInfo m_currentUser;
+    QString m_token;
+    QUrl m_sessionOrigin;
+    quint64 m_sessionRevision = 0;
     QHash<QString, QHash<int, QStringList>> m_barragesByVideo;
 };
 

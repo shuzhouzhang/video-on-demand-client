@@ -152,7 +152,9 @@ void player::updateLoginState(const QString &userName, const QString &account)
     // 为什么能实现：Login 已经通过接口或邮箱模拟拿到 userName/account，这里先写入 DataCenter 再读取展示。
     // 什么时候调用：Login::loginSuccess 信号触发时由 Qt 自动调用。
     // 和谁配合：Login 负责登录流程，DataCenter 保存当前用户，当前页面负责把用户信息显示出来。
-    DataCenter::instance().setCurrentUser(userName, account);
+    Q_UNUSED(userName);
+    Q_UNUSED(account);
+    // ApiClient 已先保存完整会话，页面只读取，不能凭账号创建登录态。
     const UserInfo currentUser = DataCenter::instance().currentUser();
 
     ui->myNickNameLabel->setText(currentUser.userName);
@@ -233,8 +235,14 @@ void player::loadAvatar(const QString &avatarPath)
         return;
     }
 
+    // 媒体下载不携带 Token；退出或切换会话后丢弃旧头像响应。
+    const auto revision = DataCenter::instance().sessionRevision();
     QNetworkReply *reply = m_avatarNetworkManager->get(QNetworkRequest(avatarUrl));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, trimmedPath]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, trimmedPath, revision]() {
+        if (revision != DataCenter::instance().sessionRevision()) {
+            reply->deleteLater();
+            return;
+        }
         if (reply->error() != QNetworkReply::NoError) {
             LOG() << "远程头像下载失败:" << trimmedPath << reply->errorString();
             reply->deleteLater();
@@ -689,15 +697,12 @@ void player::initUI()
         LOG() << "头像上传并更新成功:" << avatarPath;
     });
     connect(m_apiClient, &ApiClient::avatarUploadFailed, this, [this](const QString &message) {
-        QMessageBox::warning(this, QStringLiteral("修改头像"), message);
+        if (!message.isEmpty()) QMessageBox::warning(this, QStringLiteral("修改头像"), message);
         LOG() << "头像上传失败:" << message;
     });
-    connect(m_apiClient, &ApiClient::logoutSucceeded, this, [this]() {
-        // 这是什么：退出接口成功后的客户端状态清理。
-        // 为什么能实现：清空 DataCenter 后，所有依赖 account 的业务都会恢复未登录判断。
-        // 什么时候调用：POST /logout 返回 success=true 时调用。
+    connect(&DataCenter::instance(), &DataCenter::sessionCleared, this, [this](bool expired) {
+        // 主动退出或服务器确认 Token 失效时，统一恢复游客界面。
         // 和谁配合：主窗口恢复游客文字、默认头像和空作品区域。
-        DataCenter::instance().clearCurrentUser();
         ui->myNickNameLabel->setText(QStringLiteral("点击登录"));
         ui->myAccountLabel->setText(QStringLiteral("游客模式"));
         ui->myDescLabel->setText(QStringLiteral("登录后可以修改资料、上传视频和查看个人内容"));
@@ -707,6 +712,14 @@ void player::initUI()
         ui->myWorksEmptyLabel->show();
         clearLayout(m_myVideoGridLayout);
         setMyAvatarPixmap(QPixmap(":/images/myself/defaultAvatar.png"));
+        if (expired) {
+            ui->myDescLabel->setText(QStringLiteral("登录已失效，请重新登录"));
+            // 单例只发一次失效通知；非阻塞提示不会打断业务失败槽恢复按钮。
+            auto *notice = new QMessageBox(QMessageBox::Information, QStringLiteral("登录失效"),
+                QStringLiteral("登录已失效，请重新登录"), QMessageBox::Ok, this);
+            notice->setAttribute(Qt::WA_DeleteOnClose);
+            notice->open();
+        }
         LOG() << "已退出登录并恢复游客页面";
     });
     connect(m_apiClient, &ApiClient::logoutFailed, this, [this](const QString &message) {

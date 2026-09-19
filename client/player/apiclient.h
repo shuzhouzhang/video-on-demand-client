@@ -10,6 +10,8 @@
 #include "datacenter.h"
 
 class QNetworkAccessManager;
+class QNetworkRequest;
+class QNetworkReply;
 
 // 这是什么：真实视频上传需要的表单元数据和本地文件路径。
 // 为什么这样做：结构体把页面字段、视频路径和封面路径统一交给 ApiClient 组装 multipart 请求。
@@ -62,7 +64,7 @@ public:
     void requestEmailCode(const QString &email);
 
     // 这是什么：使用邮箱、验证码和验证码会话完成登录或首次注册。
-    // 为什么能实现：后端校验三者匹配后返回统一 userName/account 登录结果。
+    // 为什么能实现：后端校验三者匹配后返回 userName/account/token，先保存会话再通知界面。
     // 什么时候调用：邮箱登录表单校验通过并点击登录时调用。
     // 和谁配合：复用 loginSucceeded/loginFailed，让 Login 后续流程保持一致。
     void emailLogin(const QString &email, const QString &authcodeId, const QString &authcode);
@@ -70,7 +72,7 @@ public:
     // 这是什么：通知后端当前账号退出登录。
     // 为什么能实现：POST account 后，后端可清理真实系统中的会话；mock 返回确认结果。
     // 什么时候调用：已登录用户在设置入口确认退出时调用。
-    // 和谁配合：logoutSucceeded 后 player.cpp 清空 DataCenter 和页面状态。
+    // 和谁配合：DataCenter 立即通知 player.cpp 清理页面，响应信号只报告远端注销结果。
     void logout();
 
     // 这是什么：请求真实视频文件上传接口。
@@ -227,7 +229,7 @@ signals:
 
     // 这是什么：临时登录接口成功后的通知信号。
     // 为什么能实现：/login 响应 JSON 中包含 success、userName、account，解析成功后可以把用户信息交回界面。
-    // 什么时候触发：login() 收到 success=true 且 userName/account 非空的响应后触发。
+    // 什么时候触发：login() 校验用户信息和 Token 并保存共享会话后触发。
     // 和谁配合：Login 收到后继续发已有 loginSuccess 信号，让 player.cpp 更新“我的”页面。
     void loginSucceeded(const QString &userName, const QString &account);
 
@@ -250,7 +252,7 @@ signals:
     void emailCodeFailed(const QString &message);
 
     // 这是什么：退出登录成功/失败通知；为什么能实现：POST 响应提供 success/message。
-    // 什么时候触发：logout() 完成后；和谁配合：player.cpp 清空状态或提示错误。
+    // 什么时候触发：logout() 完成后报告远端结果；本机状态已在请求发送后清理。
     void logoutSucceeded();
     void logoutFailed(const QString &message);
 
@@ -456,6 +458,10 @@ signals:
     void adminRequestFailed(const QString &message);
 
 private:
+    QNetworkRequest apiRequest(const QUrl &url) const;
+    bool replyFailed(QNetworkReply *reply);
+    QString replyError(QNetworkReply *reply) const;
+
     // 这是什么：点赞和取消点赞共用的 POST 请求实现。
     // 为什么这样做：两个接口请求体和响应解析几乎一样，集中到一个函数可以减少重复和不一致。
     // 什么时候调用：likeVideo() 和 unlikeVideo() 分别传入不同 URL 后调用。

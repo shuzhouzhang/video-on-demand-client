@@ -1,3 +1,5 @@
+# 只模拟登录响应的凭证字段；此演示服务不校验 Token，鉴权回归见 Qt token_auth_test。
+import secrets
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 from email.parser import BytesParser
@@ -253,7 +255,7 @@ class MockVideosHandler(BaseHTTPRequestHandler):
             self.write_json(200, {"success": False, "message": "账号或密码错误"})
             return
 
-        self.write_json(200, {"success": True, "userName": user["userName"], "account": account})
+        self.write_json(200, {"success": True, "userName": user["userName"], "account": account, "token": secrets.token_urlsafe(32)})
 
     def handle_email_code(self, payload):
         # 这是什么：创建邮箱验证码登录会话。
@@ -291,7 +293,7 @@ class MockVideosHandler(BaseHTTPRequestHandler):
                 "userName": email.split("@", 1)[0],
                 "description": "",
             }
-        self.write_json(200, {"success": True, "userName": USERS[email]["userName"], "account": email})
+        self.write_json(200, {"success": True, "userName": USERS[email]["userName"], "account": email, "token": secrets.token_urlsafe(32)})
 
     def handle_upload_video(self, payload):
         # 这是什么：处理上传视频元数据接口 POST /videos。
