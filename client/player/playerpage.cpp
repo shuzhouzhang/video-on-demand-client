@@ -8,6 +8,8 @@
 #include "util.h"
 
 #include <QAction>
+#include <QCloseEvent>
+#include <QCoreApplication>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHideEvent>
@@ -99,11 +101,21 @@ void PlayerPage::showEvent(QShowEvent *event)
 
 void PlayerPage::hideEvent(QHideEvent *event)
 {
-    submitWatchProgress();
+    if (!m_isClosing) submitWatchProgress();
     if (m_barrageLayer) {
         m_barrageLayer->hide();
     }
     QWidget::hideEvent(event);
+}
+
+void PlayerPage::closeEvent(QCloseEvent *event)
+{
+    // 关闭时用应用持有的 ApiClient 保存最后进度，避免页面销毁取消在途请求。
+    m_isClosing = true;
+    m_watchProgressTimer->stop();
+    m_mpvPlayer->pause();
+    submitWatchProgress(true);
+    QWidget::closeEvent(event);
 }
 
 void PlayerPage::initUI(const QString &videoId,
@@ -117,6 +129,7 @@ void PlayerPage::initUI(const QString &videoId,
     ui->setupUi(this);
 
     m_videoId = videoId;
+    m_watchSessionRevision = DataCenter::instance().sessionRevision();
     m_title = title;
     setFixedSize(1450, 860);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
@@ -159,7 +172,17 @@ void PlayerPage::initUI(const QString &videoId,
     connect(ui->playBtn, &QPushButton::clicked, this, [this]() {
         m_isPlaying = !m_isPlaying;
         if (m_isPlaying) {
-            m_mpvPlayer->play();
+            // EOF 后 mpv 已卸载文件；重播需要重新加载，不能只取消暂停。
+            if (m_hasPlaybackEnded) {
+                m_pendingSeekSeconds = -1;
+                m_currentPlaySeconds = 0;
+                m_triggeredBarrageSeconds.clear();
+                updateTimeLabel(0);
+                updateSliderPosition(0);
+                startPlayback(m_videoKey, m_isBackendPlayback);
+            } else {
+                m_mpvPlayer->play();
+            }
             if (m_watchProgressTimer) {
                 m_watchProgressTimer->start();
             }
@@ -305,6 +328,7 @@ void PlayerPage::initUI(const QString &videoId,
     connect(m_mpvPlayer, &MpvPlayer::endOfPlaylist, this, [this]() {
         m_isSliderPressed = false;
         m_isPlaying = false;
+        m_hasPlaybackEnded = true;
         m_currentPlaySeconds = m_durationSeconds;
         if (m_watchProgressTimer) {
             m_watchProgressTimer->stop();
@@ -315,7 +339,12 @@ void PlayerPage::initUI(const QString &videoId,
         submitWatchProgress();
     });
 
-    connect(m_watchProgressTimer, &QTimer::timeout, this, &PlayerPage::submitWatchProgress);
+    connect(m_watchProgressTimer, &QTimer::timeout, this, [this]() { submitWatchProgress(); });
+    connect(m_mpvPlayer, &MpvPlayer::fileLoaded, this, [this]() {
+        // 加载完成与进度响应可能任意先到；两条路径都尝试恢复，避免过早 seek。
+        m_isFileLoaded = true;
+        applyPendingWatchProgress();
+    });
 
     connect(m_apiClient, &ApiClient::playUrlLoaded, this, [this](const QString &playUrl) {
         // 这是什么：播放页拿到接口返回的播放地址后启动 mpv。
@@ -331,7 +360,7 @@ void PlayerPage::initUI(const QString &videoId,
         // 什么时候调用：网络错误、接口返回失败或 playUrl 为空时触发。
         // 和谁配合：ApiClient 发失败信号，startPlayback() 继续启动本地测试视频。
         LOG() << "真实后端播放地址失败，已回退本地测试视频；这不代表真实后端播放成功:" << message;
-        startPlayback("D:/video-on-demand-client/test.mp4");
+        startPlayback("D:/video-on-demand-client/test.mp4", false);
         m_apiClient->fetchBarrages(m_videoId);
     });
     connect(m_apiClient, &ApiClient::barragesLoaded, this, [this](const QHash<int, QStringList> &barragesBySecond) {
@@ -397,12 +426,14 @@ void PlayerPage::initUI(const QString &videoId,
         // 什么时候调用：GET /videos/watch-progress 成功后由 Qt 信号槽触发。
         // 和谁配合：startPlayback() 加载视频后调用 applyPendingWatchProgress() 真正跳转。
         m_pendingSeekSeconds = qMax(0, seconds);
+        m_watchProgressReady = true;
         applyPendingWatchProgress();
     });
     connect(m_apiClient, &ApiClient::watchProgressSaved, this, []() {
         LOG() << "播放记录已保存";
     });
-    connect(m_apiClient, &ApiClient::watchProgressFailed, this, [](const QString &message) {
+    connect(m_apiClient, &ApiClient::watchProgressFailed, this, [this](const QString &message) {
+        m_watchProgressReady = true;
         LOG() << "播放记录接口请求失败:" << message;
     });
     connect(m_apiClient, &ApiClient::commentsLoaded, this, [this](const QList<CommentInfo> &comments) {
@@ -893,10 +924,10 @@ QFrame *PlayerPage::barrageTrackForIndex(int index) const
     }
 }
 
-void PlayerPage::startPlayback(const QString &playUrl)
+void PlayerPage::startPlayback(const QString &playUrl, bool backendPlayback)
 {
     // 这是什么：用指定播放地址启动 mpv，并保持进入播放页后默认暂停。
-    // 为什么能实现：MpvPlayer 已经绑定到 videoScreen，startPlay() 加载地址后 pause() 可以停在初始状态。
+    // 为什么能实现：MpvPlayer 绑定到 videoScreen，提交加载后按当前按钮状态播放或暂停。
     // 什么时候调用：播放地址接口成功返回，或接口失败需要回退本地 test.mp4 时调用。
     // 和谁配合：ApiClient 提供 playUrl，MpvPlayer 使用 m_videoKey 播放，弹幕则用 m_videoId 区分视频。
     const QString trimmedPlayUrl = playUrl.trimmed();
@@ -905,9 +936,12 @@ void PlayerPage::startPlayback(const QString &playUrl)
     }
 
     m_videoKey = trimmedPlayUrl;
+    m_hasPlaybackEnded = false;
+    m_isFileLoaded = false;
+    m_isBackendPlayback = backendPlayback;
     m_mpvPlayer->startPlay(m_videoKey);
-    m_mpvPlayer->pause();
-    applyPendingWatchProgress();
+    if (m_isPlaying) m_mpvPlayer->play();
+    else m_mpvPlayer->pause();
 }
 
 void PlayerPage::applyVideoDetail(const VideoInfo &video)
@@ -937,10 +971,9 @@ void PlayerPage::applyVideoDetail(const VideoInfo &video)
 void PlayerPage::applyPendingWatchProgress()
 {
     // 这是什么：把接口返回的上次播放秒数应用到 mpv。
-    // 为什么能实现：播放地址加载后 m_videoKey 非空，MpvPlayer 可以通过 setCurrentPlayPosition() 执行 seek。
-    // 什么时候调用：播放记录先返回或播放地址先返回都可能发生，所以两个回调都会尝试调用它。
-    // 和谁配合：watchProgressLoaded 保存待跳转秒数，startPlayback 确认 mpv 已加载视频。
-    if (m_pendingSeekSeconds <= 0 || m_videoKey.isEmpty() || !m_mpvPlayer) {
+    // 加载完成和进度响应都到达后才跳转；本地演示视频不套用真实视频进度。
+    if (m_pendingSeekSeconds <= 0 || !m_isFileLoaded || !m_isBackendPlayback || !m_mpvPlayer
+        || m_watchSessionRevision != DataCenter::instance().sessionRevision()) {
         return;
     }
 
@@ -955,17 +988,27 @@ void PlayerPage::applyPendingWatchProgress()
     LOG() << "已恢复上次播放进度:" << targetSeconds;
 }
 
-void PlayerPage::submitWatchProgress()
+void PlayerPage::submitWatchProgress(bool detached)
 {
     // 这是什么：统一提交当前视频播放进度。
     // 为什么能实现：PlayerPage 持有 videoId 和 m_currentPlaySeconds，ApiClient 负责把它们 POST 到 mock/后端。
     // 什么时候调用：播放定时器触发、暂停、播放结束、隐藏或关闭播放页时调用。
     // 和谁配合：ApiClient::saveWatchProgress() 保存进度，下次 fetchWatchProgress() 可读取回来。
-    if (!m_apiClient || m_videoId.isEmpty() || m_currentPlaySeconds < 0) {
+    const auto &session = DataCenter::instance();
+    // 不把尚未加载/恢复的零进度、本地回退或上一账号的进度写入真实观看记录。
+    if (!m_apiClient || m_videoId.isEmpty() || m_currentPlaySeconds < 0
+        || !m_isFileLoaded || !m_isBackendPlayback || !m_watchProgressReady
+        || !session.isLoggedIn() || m_watchSessionRevision != session.sessionRevision()) {
         return;
     }
 
-    m_apiClient->saveWatchProgress(m_videoId, m_currentPlaySeconds);
+    ApiClient *client = m_apiClient;
+    if (detached) {
+        client = new ApiClient(QCoreApplication::instance());
+        connect(client, &ApiClient::watchProgressSaved, client, &QObject::deleteLater);
+        connect(client, &ApiClient::watchProgressFailed, client, &QObject::deleteLater);
+    }
+    client->saveWatchProgress(m_videoId, m_currentPlaySeconds);
 }
 
 QString PlayerPage::formatSeconds(int seconds)

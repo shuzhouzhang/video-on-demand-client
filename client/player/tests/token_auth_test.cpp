@@ -42,6 +42,38 @@ class TokenAuthTest : public QObject
     }
 
 private slots:
+    void emptyVideoListClearsCache()
+    {
+        DataCenter::instance().setHomeVideos({VideoInfo{"old", "old title"}});
+        ApiClient api;
+        QSignalSpy loaded(&api, &ApiClient::videosLoaded), failed(&api, &ApiClient::requestFailed);
+        enqueue(200, "[]"); api.fetchVideos();
+        QTRY_COMPARE(loaded.count(), 1);
+        QCOMPARE(failed.count(), 0);
+        const auto videos = qvariant_cast<QList<VideoInfo>>(loaded.first()[0]);
+        QVERIFY(videos.isEmpty());
+        DataCenter::instance().setHomeVideos(videos);
+        QVERIFY(DataCenter::instance().homeVideos().isEmpty());
+    }
+
+    void malformedVideoListIsRejected_data()
+    {
+        QTest::addColumn<QByteArray>("body");
+        QTest::newRow("broken JSON") << QByteArray("[");
+        QTest::newRow("object") << QByteArray("{\"success\":false}");
+        QTest::newRow("null") << QByteArray("null");
+    }
+
+    void malformedVideoListIsRejected()
+    {
+        QFETCH(QByteArray, body);
+        ApiClient api;
+        QSignalSpy loaded(&api, &ApiClient::videosLoaded), failed(&api, &ApiClient::requestFailed);
+        enqueue(200, body); api.fetchVideos();
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(loaded.count(), 0);
+    }
+
     void initTestCase()
     {
         QVERIFY(server.listen(QHostAddress::LocalHost));

@@ -17,14 +17,11 @@
 #include <QVBoxLayout>
 
 namespace {
+// 登录只检查必填项；已有凭证的格式和有效性由后端判断，不能套用注册限制。
 QString accountRuleError(const QString &account)
 {
     if (account.isEmpty()) {
         return "账号不能为空";
-    }
-
-    if (account.length() < 3 || account.length() > 32) {
-        return "账号长度需要在 3 到 32 位之间";
     }
 
     return {};
@@ -40,25 +37,6 @@ QString passwordRuleError(const QString &password)
 {
     if (password.isEmpty()) {
         return "密码不能为空";
-    }
-
-    if (password.length() < 6 || password.length() > 20) {
-        return "密码长度需要在 6 到 20 位之间";
-    }
-
-    bool hasLetter = false;
-    bool hasDigit = false;
-
-    for (const QChar &ch : password) {
-        if (ch.isLetter()) {
-            hasLetter = true;
-        } else if (ch.isDigit()) {
-            hasDigit = true;
-        }
-    }
-
-    if (!hasLetter || !hasDigit) {
-        return "密码需要同时包含字母和数字";
     }
 
     return {};

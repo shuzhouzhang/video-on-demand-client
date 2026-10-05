@@ -94,7 +94,7 @@ public:
 
     // 这是什么：保存接口返回的首页视频列表。
     // 为什么能实现：ApiClient 已经把 JSON 解析成 QList<VideoInfo>，这里直接替换 DataCenter 的当前视频数据。
-    // 什么时候调用：ApiClient::videosLoaded 触发后，player::setHomeVideos() 接收到非空列表时调用。
+    // 什么时候调用：ApiClient::videosLoaded 触发后，player::setHomeVideos() 接收到列表时调用。
     // 和谁配合：homeVideos() 负责把保存后的数据再交给首页读取和展示。
     void setHomeVideos(const QList<VideoInfo> &videos);
 

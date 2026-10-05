@@ -462,10 +462,6 @@ void player::setHomeVideos(const QList<VideoInfo> &videos)
     // 为什么能实现：ApiClient 已把 JSON 转成 QList<VideoInfo>，这里先交给 DataCenter 保存，再读取最新数据重绘卡片。
     // 什么时候调用：ApiClient::videosLoaded 信号触发时由 Qt 自动调用。
     // 和谁配合：DataCenter 统一管理首页视频数据，m_homeVideos 作为当前页面筛选和渲染缓存。
-    if (videos.isEmpty()) {
-        return;
-    }
-
     DataCenter::instance().setHomeVideos(videos);
     if (m_searchKeyword.isEmpty()) {
         m_homeVideos = DataCenter::instance().homeVideos();
@@ -615,9 +611,11 @@ void player::initUI()
         // 为什么能实现：搜索接口返回与首页列表相同的 VideoInfo，现有渲染函数可以直接复用。
         // 什么时候调用：GET /videos/search 成功后由 Qt 信号槽触发，包括零条结果。
         // 和谁配合：renderHomeVideos() 同时应用当前分类、标签和搜索结果。
-        m_homeVideos = videos;
         ui->searchBtn->setEnabled(true);
         ui->searchBtn->setText(QStringLiteral("搜索"));
+        // 刷新已清空搜索条件，迟到的搜索结果不能再覆盖完整首页列表。
+        if (m_searchKeyword.isEmpty()) return;
+        m_homeVideos = videos;
         renderHomeVideos();
         LOG() << "视频搜索完成:" << m_searchKeyword << "结果数:" << videos.size();
     });
@@ -1114,6 +1112,8 @@ void player::initUI()
         ui->videoScroll->verticalScrollBar()->setValue(0);
         ui->searchEdit->clear();
         m_searchKeyword.clear();
+        m_homeVideos = DataCenter::instance().homeVideos();
+        renderHomeVideos();
         m_apiClient->fetchVideos();
         LOG() << "刷新首页视频列表";
     });

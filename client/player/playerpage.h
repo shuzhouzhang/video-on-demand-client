@@ -11,6 +11,7 @@
 #include "mpv/mpvplayer.h"
 
 class QLabel;
+class QCloseEvent;
 class QFrame;
 class QHideEvent;
 class QLineEdit;
@@ -48,6 +49,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
 
 private:
     void initUI(const QString &videoId,
@@ -76,25 +78,31 @@ private:
     void showBarragesAt(int seconds);
     void showBarrageText(const QString &text, int trackIndex = -1);
     QFrame *barrageTrackForIndex(int index) const;
-    void startPlayback(const QString &playUrl);
+    void startPlayback(const QString &playUrl, bool backendPlayback = true);
     void applyVideoDetail(const VideoInfo &video);
     void applyPendingWatchProgress();
-    void submitWatchProgress();
+    void submitWatchProgress(bool detached = false);
     static QString formatSeconds(int seconds);
 
 private:
     Ui::PlayerPage *ui;
     bool m_isDragging = false;
     bool m_isPlaying = false;
+    bool m_hasPlaybackEnded = false;
     bool m_isLiked = false;
     bool m_isFavorited = false;
     bool m_isSliderPressed = false;
     double m_playSpeed = 1.0;
     int m_volume = 60;
     int m_durationSeconds = 0;
-    int m_currentPlaySeconds = 0;
+    int m_currentPlaySeconds = -1;
     int m_pendingSeekSeconds = -1;
     int m_nextBarrageTrack = 0;
+    bool m_isFileLoaded = false;
+    bool m_isBackendPlayback = false;
+    bool m_watchProgressReady = false;
+    bool m_isClosing = false;
+    quint64 m_watchSessionRevision = 0;
     QPoint m_dragOffset;
     QString m_videoId;
     QString m_title;

@@ -87,9 +87,56 @@ install(SCRIPT ${deploy_script})
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(login_test tests/login_test.cpp login.cpp login.h login.ui
+        apiclient.cpp apiclient.h datacenter.cpp datacenter.h imageRes.qrc)
+    target_include_directories(login_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(login_test PRIVATE Qt::Core Qt::Widgets Qt::Network Qt::Test)
+    add_test(NAME login COMMAND login_test -o ${CMAKE_CURRENT_BINARY_DIR}/login-results.txt,txt)
+    set_tests_properties(login PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+
     qt_add_executable(token_auth_test
         tests/token_auth_test.cpp apiclient.cpp apiclient.h datacenter.cpp datacenter.h)
     target_include_directories(token_auth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(token_auth_test PRIVATE Qt::Core Qt::Network Qt::Test)
-    add_test(NAME token_auth COMMAND token_auth_test)
+    # 结果写到构建目录，Windows 无控制台运行也能查看用例详情；不输出凭证。
+    add_test(NAME token_auth COMMAND token_auth_test -o ${CMAKE_CURRENT_BINARY_DIR}/token-auth-results.txt,txt)
+
+    # 页面使用可控播放替身和真实 HTTP 请求，验证加载顺序及窗口销毁边界。
+    qt_add_executable(playerpage_test
+        tests/playerpage_test.cpp playerpage.cpp playerpage.h playerpage.ui
+        mpv/mpvplayer.h bulletscreenitem.cpp bulletscreenitem.h
+        commentdialog.cpp commentdialog.h
+        apiclient.cpp apiclient.h datacenter.cpp datacenter.h imageRes.qrc)
+    target_include_directories(playerpage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(playerpage_test PRIVATE Qt::Core Qt::Widgets Qt::Network Qt::Test)
+    add_test(NAME playerpage COMMAND playerpage_test -o ${CMAKE_CURRENT_BINARY_DIR}/playerpage-results.txt,txt)
+    set_tests_properties(playerpage PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    qt_add_executable(mpvplayer_test tests/mpvplayer_test.cpp mpv/mpvplayer.cpp mpv/mpvplayer.h)
+    target_include_directories(mpvplayer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(mpvplayer_test PRIVATE Qt::Core Qt::Widgets Qt::Test)
+    add_test(NAME mpvplayer COMMAND mpvplayer_test -o ${CMAKE_CURRENT_BINARY_DIR}/mpvplayer-results.txt,txt)
+    set_tests_properties(token_auth playerpage mpvplayer PROPERTIES TIMEOUT 30)
+
+    # 真实联调必须手动指定环境和开发账号，不加入默认 CTest，防止误写线上数据。
+    qt_add_executable(live_ui_test tests/live_ui_test.cpp
+        login.cpp login.h login.ui playerpage.cpp playerpage.h playerpage.ui
+        apiclient.cpp apiclient.h datacenter.cpp datacenter.h
+        mpv/mpvplayer.cpp mpv/mpvplayer.h bulletscreenitem.cpp bulletscreenitem.h
+        commentdialog.cpp commentdialog.h imageRes.qrc)
+    target_include_directories(live_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(live_ui_test PRIVATE Qt::Core Qt::Widgets Qt::Network Qt::Test
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv.dll.a)
+    add_custom_command(TARGET live_ui_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv-2.dll $<TARGET_FILE_DIR:live_ui_test>/libmpv-2.dll)
+
+    qt_add_executable(live_backend_test tests/live_backend_test.cpp
+        apiclient.cpp apiclient.h datacenter.cpp datacenter.h mpv/mpvplayer.cpp mpv/mpvplayer.h)
+    target_include_directories(live_backend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(live_backend_test PRIVATE Qt::Core Qt::Widgets Qt::Network Qt::Test
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv.dll.a)
+    add_custom_command(TARGET live_backend_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/mpv/dll/libmpv-2.dll $<TARGET_FILE_DIR:live_backend_test>/libmpv-2.dll)
 endif()

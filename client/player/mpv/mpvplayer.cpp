@@ -54,6 +54,7 @@ MpvPlayer::MpvPlayer(QWidget *videoRenderWidget, QObject *parent)
 MpvPlayer::~MpvPlayer()
 {
     if (m_mpv != nullptr) {
+        mpv_set_wakeup_callback(m_mpv, nullptr, nullptr);
         mpv_terminate_destroy(m_mpv);
         m_mpv = nullptr;
     }
@@ -142,13 +143,8 @@ void MpvPlayer::handleMpvEvent(mpv_event *event)
         }
 
         if (std::strcmp(property->name, "time-pos") == 0) {
-            double segmentStartSeconds = 0;
-            double segmentCurrentSeconds = *static_cast<double *>(property->data);
-            if (mpv_get_property(m_mpv, "demuxer-start-time", MPV_FORMAT_DOUBLE, &segmentStartSeconds) < 0) {
-                segmentStartSeconds = 0;
-            }
-
-            const int seconds = std::max(0, static_cast<int>(segmentStartSeconds + segmentCurrentSeconds));
+            // time-pos 已是当前文件的播放位置，不能再叠加媒体原始时间戳。
+            const int seconds = std::max(0, static_cast<int>(*static_cast<double *>(property->data)));
             if (seconds != m_currentSeconds) {
                 m_currentSeconds = seconds;
                 emit playPositionChanged(m_currentSeconds);
@@ -158,6 +154,9 @@ void MpvPlayer::handleMpvEvent(mpv_event *event)
         }
         break;
     }
+    case MPV_EVENT_FILE_LOADED:
+        emit fileLoaded();
+        break;
     case MPV_EVENT_END_FILE: {
         auto *endFile = static_cast<mpv_event_end_file *>(event->data);
         if (endFile != nullptr && endFile->reason == MPV_END_FILE_REASON_EOF) {
@@ -166,6 +165,9 @@ void MpvPlayer::handleMpvEvent(mpv_event *event)
         break;
     }
     case MPV_EVENT_SHUTDOWN:
+        // shutdown 通知仍要求客户端释放句柄，直接置空会遗漏资源清理。
+        mpv_set_wakeup_callback(m_mpv, nullptr, nullptr);
+        mpv_destroy(m_mpv);
         m_mpv = nullptr;
         break;
     default:

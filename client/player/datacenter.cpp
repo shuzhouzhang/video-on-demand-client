@@ -109,12 +109,8 @@ void DataCenter::setHomeVideos(const QList<VideoInfo> &videos)
 {
     // 这是什么：把接口返回的视频列表写进 DataCenter。
     // 为什么能实现：ApiClient 已经完成 JSON 到 VideoInfo 的转换，这里只负责保存当前可展示的数据源。
-    // 什么时候调用：首页收到 ApiClient::videosLoaded 信号并确认列表非空后调用。
+    // 什么时候调用：首页收到 ApiClient::videosLoaded 信号后调用，空列表用于清除旧卡片。
     // 和谁配合：homeVideos() 随后把最新数据交回 player.cpp，用来刷新首页卡片和筛选结果。
-    if (videos.isEmpty()) {
-        return;
-    }
-
     m_homeVideos = videos;
 }
 

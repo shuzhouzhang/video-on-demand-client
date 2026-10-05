@@ -203,16 +203,19 @@ void ApiClient::fetchVideos()
         // 什么时候调用：确认没有网络错误后调用。
         // 和谁配合：parseVideosFromJson 在 DataCenter 模块里，保持“JSON 翻译”逻辑复用。
         const QByteArray data = reply->readAll();
-        const QList<VideoInfo> videos = parseVideosFromJson(data);
-        if (videos.isEmpty()) {
-            emit requestFailed("视频列表为空或 JSON 格式不正确");
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
+        // 空数组是合法结果；只有解析失败或非数组响应才保留首页旧数据。
+        if (parseError.error != QJsonParseError::NoError || !document.isArray()) {
+            emit requestFailed("视频列表 JSON 格式不正确");
             reply->deleteLater();
             return;
         }
+        const QList<VideoInfo> videos = parseVideosFromJson(data);
 
         // 这是什么：把接口得到的视频列表发给页面。
         // 为什么能实现：videosLoaded 是 Qt 信号，player.cpp 已经 connect 到 setHomeVideos()。
-        // 什么时候调用：网络成功且 JSON 至少解析出一个视频后调用。
+        // 什么时候调用：网络成功且 JSON 是视频数组后调用，空数组也会刷新页面。
         // 和谁配合：player.cpp 更新 m_homeVideos 并重新 renderHomeVideos()。
         emit videosLoaded(videos);
         reply->deleteLater();

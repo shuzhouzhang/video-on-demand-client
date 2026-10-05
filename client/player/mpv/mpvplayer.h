@@ -27,6 +27,8 @@ signals:
     void mpvEvents();
     void playPositionChanged(int seconds);
     void durationChanged(int seconds);
+    // 文件完成加载后才允许播放页恢复进度，loadfile 返回并不代表加载完成。
+    void fileLoaded();
     void endOfPlaylist();
 
 private slots:
